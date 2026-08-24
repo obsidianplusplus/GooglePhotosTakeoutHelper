@@ -1,0 +1,27 @@
+.idea/
+.vscode/
+
+# Python 构建输出
+build/
+
+photos/
+
+ALL_PHOTOS/
+output/
+*.log
+
+# Python 虚拟环境、缓存、测试与打包产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+*.egg-info/
+dist/
+*.spec
+
+# 任务中断时可能留下的临时安全复制文件
+*.gpth-part
