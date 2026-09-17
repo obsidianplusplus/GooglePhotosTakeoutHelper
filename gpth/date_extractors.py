@@ -15,6 +15,7 @@ import mimetypes
 import os
 import re
 import unicodedata
+import warnings
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +23,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from . import image_support
 from .constants import DEFAULT_MAX_EXIF_BYTES, EXTRA_SUFFIXES, IMAGE_EXTENSIONS
 from .models import CancelledError, DateSource, OrganizeOptions, TaskContext
 
@@ -135,6 +137,10 @@ _PIL_ATTEMPTED = False
 _PIL_MODULES: tuple[Any, Any] | None = None
 _PIL_IMPORT_ERROR: BaseException | None = None
 _PIL_ERROR_REPORTED = False
+
+# 同一次扫描遇到成千上万个 HEIC 时，相同的环境错误只提示一次；集合放在
+# TaskContext 实例上，下一轮扫描使用新上下文后仍会重新给出诊断。
+_EXIF_NOTICE_LOCK = Lock()
 
 
 def _nfc(value: str) -> str:
@@ -291,30 +297,26 @@ def json_sidecar_candidates(media_path: PathLike, *, aggressive: bool = False) -
     )
 
 
-def _existing_sidecars(
-    parent: Path, candidates: tuple[_SidecarCandidate, ...]
-) -> list[tuple[Path, bool]]:
-    """查找实际存在的候选；直接路径失败后再做 NFC/大小写兼容扫描。"""
+_SidecarDirectoryIndex = tuple[
+    dict[str, Path],
+    dict[str, Path],
+    dict[str, Path],
+]
 
-    found: list[tuple[Path, bool]] = []
-    found_paths: set[Path] = set()
-    for candidate in candidates:
-        path = parent / candidate.name
-        try:
-            if path.is_file() and path not in found_paths:
-                found.append((path, candidate.aggressive))
-                found_paths.add(path)
-        except OSError:
-            continue
-    if found:
-        return found
 
-    # Linux 不会像常见 macOS 文件系统那样自动等价处理 NFC/NFD，因此只有在
-    # 直接候选全部失败时扫描一次目录。这样兼顾正确性与大型相册的性能。
-    exact: dict[str, Path] = {}
+def _build_sidecar_directory_index(
+    parent: Path,
+    context: TaskContext | None,
+) -> _SidecarDirectoryIndex:
+    """一次扫描目录，建立原名、NFC 名称与忽略大小写三层索引。"""
+
+    raw: dict[str, Path] = {}
+    normalized: dict[str, Path] = {}
     folded: dict[str, Path] = {}
     try:
-        for entry in parent.iterdir():
+        for number, entry in enumerate(parent.iterdir()):
+            if number % 256 == 0:
+                _check_cancelled(context)
             if not entry.name.casefold().endswith(".json"):
                 continue
             try:
@@ -322,14 +324,55 @@ def _existing_sidecars(
                     continue
             except OSError:
                 continue
-            normalized = _nfc(entry.name)
-            exact.setdefault(normalized, entry)
-            folded.setdefault(normalized.casefold(), entry)
+            normalized_name = _nfc(entry.name)
+            raw.setdefault(entry.name, entry)
+            normalized.setdefault(normalized_name, entry)
+            folded.setdefault(normalized_name.casefold(), entry)
+    except CancelledError:
+        raise
     except OSError:
-        return found
+        # 失败也缓存为空索引；同一次扫描中反复访问不可读目录没有意义。
+        pass
+    return raw, normalized, folded
 
+
+def _sidecar_directory_index(
+    parent: Path,
+    context: TaskContext | None,
+) -> _SidecarDirectoryIndex:
+    """返回任务级目录索引；同一 TaskContext 中每个目录最多枚举一次。"""
+
+    if context is None:
+        return _build_sidecar_directory_index(parent, None)
+
+    # normcase 兼容 Windows 大小写不敏感路径；绝对路径避免同一目录因相对写法
+    # 不同而建立多份索引。缓存跟随 TaskContext 生命周期，不会跨扫描陈旧。
+    cache_key = os.path.normcase(os.path.abspath(os.fspath(parent)))
+    with context._sidecar_directory_index_lock:
+        cached = context._sidecar_directory_indexes.get(cache_key)
+        if cached is not None:
+            return cached
+        index = _build_sidecar_directory_index(parent, context)
+        context._sidecar_directory_indexes[cache_key] = index
+        return index
+
+
+def _existing_sidecars(
+    parent: Path,
+    candidates: tuple[_SidecarCandidate, ...],
+    context: TaskContext | None,
+) -> list[tuple[Path, bool]]:
+    """从任务级目录索引中按候选优先级查找实际存在的边车文件。"""
+
+    raw, normalized, folded = _sidecar_directory_index(parent, context)
+    found: list[tuple[Path, bool]] = []
+    found_paths: set[Path] = set()
     for candidate in candidates:
-        matched = exact.get(candidate.name) or folded.get(candidate.name.casefold())
+        matched = (
+            raw.get(candidate.name)
+            or normalized.get(candidate.name)
+            or folded.get(candidate.name.casefold())
+        )
         if matched is not None and matched not in found_paths:
             found.append((matched, candidate.aggressive))
             found_paths.add(matched)
@@ -397,7 +440,11 @@ def _extract_json(
             include_safe=include_safe,
             include_aggressive=include_aggressive,
         )
-        for sidecar, aggressive in _existing_sidecars(media_path.parent, candidates):
+        for sidecar, aggressive in _existing_sidecars(
+            media_path.parent,
+            candidates,
+            context,
+        ):
             _check_cancelled(context)
             try:
                 value = _read_json_datetime(sidecar)
@@ -464,6 +511,9 @@ def _load_pillow(context: TaskContext | None) -> tuple[Any, Any] | None:
             try:
                 from PIL import ExifTags, Image
 
+                # 注册函数自身有全局锁；日期提取和重复预览即使并发初始化，
+                # 也只会真正调用 pillow-heif 一次。
+                image_support.ensure_pillow_heif()
                 _PIL_MODULES = (Image, ExifTags)
             # 某些损坏的二进制 Pillow 安装会抛出 RuntimeError 等异常；仍然只
             # 禁用 EXIF，不应连带禁用 JSON、文件名和 mtime 提取。
@@ -474,6 +524,22 @@ def _load_pillow(context: TaskContext | None) -> tuple[Any, Any] | None:
             _PIL_ERROR_REPORTED = True
             _log(context, "warning", f"Pillow 不可用，已跳过 EXIF：{_PIL_IMPORT_ERROR}")
         return modules
+
+
+def _log_exif_notice_once(
+    context: TaskContext | None,
+    key: str,
+    message: str,
+) -> None:
+    """同一任务的同类环境问题只记录一次，避免日志洪泛拖慢界面。"""
+
+    if context is None:
+        return
+    with _EXIF_NOTICE_LOCK:
+        if key in context._exif_notices:
+            return
+        context._exif_notices.add(key)
+    _log(context, "warning", message)
 
 
 def _coerce_exif_text(value: Any) -> str | None:
@@ -566,14 +632,47 @@ def exif_extractor(
         if modules is None:
             return None
         Image, _ExifTags = modules
+        unavailable_reason = image_support.decoder_unavailable_reason(path, Image)
+        if unavailable_reason is not None:
+            _log_exif_notice_once(
+                context,
+                f"decoder-unavailable:{path.suffix.casefold()}",
+                f"读取 {path} 的 EXIF 已跳过：{unavailable_reason}"
+                "（本次扫描中同类原因仅提示一次）",
+            )
+            return None
         _check_cancelled(context)
-        with Image.open(path) as image:
-            mappings = _exif_mappings(image)
-            for tag in _EXIF_DATE_TAGS:
-                for mapping in mappings:
-                    value = _parse_exif_datetime(mapping.get(tag))
-                    if value is not None:
-                        return DateExtractionResult(value, DateSource.EXIF, EXIF_ACCURACY)
+        try:
+            # EXIF 只读取容器元数据，不展开整张像素图。局部隐藏 Pillow 的
+            # DecompressionBombWarning 可避免超高分辨率全景图污染控制台；
+            # MAX_IMAGE_PIXELS 未被修改，超过硬上限的 DecompressionBombError
+            # 仍会被拒绝，因此没有关闭 Pillow 的安全保护。
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+                with Image.open(path) as image:
+                    mappings = _exif_mappings(image)
+                    for tag in _EXIF_DATE_TAGS:
+                        for mapping in mappings:
+                            value = _parse_exif_datetime(mapping.get(tag))
+                            if value is not None:
+                                return DateExtractionResult(
+                                    value,
+                                    DateSource.EXIF,
+                                    EXIF_ACCURACY,
+                                )
+        except Image.DecompressionBombError as exc:
+            _log(
+                context,
+                "warning",
+                f"读取 {path} 的 EXIF 已拒绝：图片像素数超过 Pillow 安全硬上限（{exc}）",
+            )
+            return None
+        except Image.UnidentifiedImageError as exc:
+            reason = image_support.heif_decode_failure_reason(path, exc)
+            if reason is None:
+                reason = f"Pillow 无法识别图片内容：{exc}"
+            _log(context, "warning", f"读取 {path} 的 EXIF 失败，已跳过：{reason}")
+            return None
         return None
     except CancelledError:
         raise

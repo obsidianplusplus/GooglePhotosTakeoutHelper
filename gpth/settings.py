@@ -11,24 +11,50 @@ from typing import Any
 
 from .constants import settings_path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_SETTINGS: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
-    "appearance": "system",
-    "accent": "blue",
-    "ui_scale": 1.0,
-    "window_geometry": "1180x760",
+    "appearance": "System",
+    "scaling": 1.0,
+    "geometry": "1180x760",
+    # 此值现在表示渐进加载的单批行数，不再截断执行计划。
+    "preview_limit": 300,
     "remember_paths": False,
+    "operation": "copy",
+    "album_mode": "shortcut",
+    "date_division": "year-month",
+    "conflict_mode": "rename",
+    "unknown_date_mode": "folder",
+    "skip_extras": False,
+    "set_file_mtime": True,
+    "use_json": True,
+    "use_exif": True,
+    "use_filename": True,
+    "aggressive_json": True,
+    "use_file_mtime": False,
+    "scan_all_if_no_takeout": True,
+    "include_hidden": False,
+    "write_report": True,
+    "use_hash_cache": True,
+    "recognize_live_photos": False,
+    "live_photo_target": "apple",
+    # 仅在用户明确启用时，才按拍摄日期修正完整日期型文件名。
+    "correct_date_filenames": False,
+    "workers": 4,
+    "all_photos_folder": "ALL_PHOTOS",
+    "unknown_date_folder": "date-unknown",
+    "fix_recursive": True,
+    "fix_json": True,
+    "fix_exif": True,
+    "fix_filename": True,
+    "fix_aggressive": True,
+    "fix_file_mtime": False,
+    "fix_include_hidden": False,
+    "fix_dry_run": False,
+    "fix_correct_date_filenames": False,
     "input_dir": "",
     "output_dir": "",
-    "defaults": {
-        "operation": "copy",
-        "album_mode": "shortcut",
-        "date_division": "year-month",
-        "conflict_mode": "rename",
-        "unknown_date_mode": "folder",
-        "workers": 4,
-    },
+    "fix_dir": "",
 }
 
 
@@ -41,7 +67,7 @@ def load_settings(path: Path | None = None) -> dict[str, Any]:
         loaded = json.loads(target.read_text(encoding="utf-8"))
         if not isinstance(loaded, dict):
             return defaults
-        return _merge_dict(defaults, loaded)
+        return _normalise_settings(_merge_dict(defaults, _migrate_legacy_settings(loaded)))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return defaults
 
@@ -51,7 +77,7 @@ def save_settings(values: dict[str, Any], path: Path | None = None) -> None:
 
     target = path or settings_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    data = _merge_dict(deepcopy(DEFAULT_SETTINGS), values)
+    data = _normalise_settings(_merge_dict(deepcopy(DEFAULT_SETTINGS), values))
     data["schema_version"] = SCHEMA_VERSION
     temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -70,3 +96,37 @@ def _merge_dict(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any
         else:
             base[key] = value
     return base
+
+
+def _migrate_legacy_settings(loaded: dict[str, Any]) -> dict[str, Any]:
+    """把早期设置模块的嵌套字段迁移为桌面界面使用的扁平字段。"""
+
+    migrated = deepcopy(loaded)
+    if "geometry" not in migrated and "window_geometry" in migrated:
+        migrated["geometry"] = migrated["window_geometry"]
+    if "scaling" not in migrated and "ui_scale" in migrated:
+        migrated["scaling"] = migrated["ui_scale"]
+
+    legacy_defaults = migrated.get("defaults")
+    if isinstance(legacy_defaults, dict):
+        for key, value in legacy_defaults.items():
+            migrated.setdefault(key, value)
+    return migrated
+
+
+def _normalise_settings(values: dict[str, Any]) -> dict[str, Any]:
+    """对安全敏感的新字段做类型与枚举收敛，损坏值回退到兼容默认值。"""
+
+    if not isinstance(values.get("recognize_live_photos"), bool):
+        values["recognize_live_photos"] = False
+    if values.get("live_photo_target") not in {"apple", "coloros16"}:
+        values["live_photo_target"] = "apple"
+    for key in ("correct_date_filenames", "fix_correct_date_filenames"):
+        if not isinstance(values.get(key), bool):
+            values[key] = False
+    try:
+        preview_batch_size = int(values.get("preview_limit", 300))
+    except (TypeError, ValueError):
+        preview_batch_size = 300
+    values["preview_limit"] = min(max(preview_batch_size, 100), 1000)
+    return values

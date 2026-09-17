@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from typing import Any
 
 from .constants import (
@@ -53,6 +53,29 @@ class UnknownDateMode(StrEnum):
     FOLDER = "folder"
     ROOT = "root"
     SKIP = "skip"
+
+
+class LivePhotoTarget(StrEnum):
+    """实况照片整理后的官方导入路径。"""
+
+    APPLE = "apple"
+    COLOROS16 = "coloros16"
+
+
+class LivePhotoMetadataStatus(StrEnum):
+    """Apple 实况照片配对元数据的只读校验结果。"""
+
+    VERIFIED = "verified"
+    MISSING = "missing"
+    CONFLICT = "conflict"
+    UNKNOWN = "unknown"
+
+
+class LivePhotoRole(StrEnum):
+    """实况照片组合中的物理文件角色。"""
+
+    STILL = "still"
+    MOTION = "motion"
 
 
 class DateSource(StrEnum):
@@ -109,6 +132,10 @@ class OrganizeOptions:
     scan_all_if_no_takeout: bool = True
     include_hidden: bool = False
     write_report: bool = True
+    use_hash_cache: bool = True
+    recognize_live_photos: bool = False
+    live_photo_target: LivePhotoTarget = LivePhotoTarget.APPLE
+    correct_date_filenames: bool = False
     all_photos_folder: str = DEFAULT_ALL_PHOTOS_FOLDER
     unknown_date_folder: str = DEFAULT_UNKNOWN_DATE_FOLDER
     workers: int = 4
@@ -126,6 +153,7 @@ class OrganizeOptions:
         values["date_division"] = DateDivision(self.date_division)
         values["conflict_mode"] = ConflictMode(self.conflict_mode)
         values["unknown_date_mode"] = UnknownDateMode(self.unknown_date_mode)
+        values["live_photo_target"] = LivePhotoTarget(self.live_photo_target)
         values["workers"] = min(max(int(self.workers), 1), 32)
         values["hash_chunk_size"] = max(int(self.hash_chunk_size), 64 * 1024)
         values["all_photos_folder"] = _safe_folder_name(
@@ -178,6 +206,16 @@ class MediaRecord:
     date_taken: datetime | None = None
     date_source: DateSource | None = None
     date_accuracy: int | None = None
+    # 与 locations 使用同一相册键；开启实况识别后，动态片段不再作为
+    # 独立媒体，而是和静态图共同参与去重、命名与执行。
+    live_photo_companions: dict[str | None, Path] = field(default_factory=dict)
+    live_photo_metadata: dict[str | None, LivePhotoMetadataStatus] = field(default_factory=dict)
+    live_photo_evidence: dict[str | None, str] = field(default_factory=dict)
+    live_photo_repaired_suffix: dict[str | None, bool] = field(default_factory=dict)
+    live_photo_output_motion_suffixes: dict[str | None, str] = field(default_factory=dict)
+    # 对已通过容器签名确认、但源文件没有扩展名或被误写成 .mp/.mp3 的
+    # 独立视频，记录安全的输出后缀。这里只影响目标文件名，不会转码或改写源文件。
+    output_suffixes: dict[str | None, str] = field(default_factory=dict)
 
     @property
     def first_file(self) -> Path:
@@ -190,6 +228,87 @@ class MediaRecord:
     @property
     def has_timeline_copy(self) -> bool:
         return None in self.locations
+
+    @property
+    def is_live_photo(self) -> bool:
+        """是否至少有一个来源包含经过确认的动态片段。"""
+
+        return bool(self.live_photo_companions)
+
+    def companion_for(self, album: str | None) -> Path | None:
+        """返回指定来源的实况动态片段。"""
+
+        return self.live_photo_companions.get(album)
+
+    def output_motion_suffix_for(self, album: str | None) -> str | None:
+        """返回扫描阶段按容器确认的动态片段输出后缀。"""
+
+        return self.live_photo_output_motion_suffixes.get(album)
+
+    def output_suffix_for(self, album: str | None) -> str | None:
+        """返回独立媒体经内容确认后的输出后缀。"""
+
+        return self.output_suffixes.get(album)
+
+
+class DuplicateDisposition(StrEnum):
+    """重复成员在本次分析中的处理方式。"""
+
+    PRIMARY = "primary"
+    ALBUM_COPY = "album-copy"
+    SKIPPED = "skipped"
+    FILTERED = "filtered"
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateMember:
+    """重复组中的一个原始物理文件。"""
+
+    path: Path
+    album: str | None
+    size: int
+    digest: str
+    modified_ns: int | None = None
+    disposition: DuplicateDisposition = DuplicateDisposition.SKIPPED
+    reason: str = ""
+    companion_path: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateGroup:
+    """内容完全相同的一组文件，供只读对比预览使用。"""
+
+    digest: str
+    size: int
+    members: tuple[DuplicateMember, ...]
+    primary_path: Path | None = None
+    date_taken: datetime | None = None
+    date_source: DateSource | None = None
+    is_live_photo: bool = False
+
+    @property
+    def redundant_count(self) -> int:
+        """除主文件之外的物理副本数量。"""
+
+        return max(len(self.members) - 1, 0)
+
+    @property
+    def skipped_count(self) -> int:
+        """因同来源内容重复而不会进入计划的文件数。"""
+
+        return sum(member.disposition is DuplicateDisposition.SKIPPED for member in self.members)
+
+    @property
+    def album_copy_count(self) -> int:
+        """为保留相册关系而存在的同内容来源数。"""
+
+        return sum(member.disposition is DuplicateDisposition.ALBUM_COPY for member in self.members)
+
+    @property
+    def reclaimable_bytes(self) -> int:
+        """原去重逻辑跳过的副本大小；不把相册副本误算为空间收益。"""
+
+        return self.skipped_count * self.size
 
 
 @dataclass(slots=True)
@@ -205,6 +324,15 @@ class RunStatistics:
     discovered: int = 0
     after_deduplication: int = 0
     duplicates_removed: int = 0
+    duplicate_groups: int = 0
+    duplicate_files: int = 0
+    hash_cache_hits: int = 0
+    hash_cache_misses: int = 0
+    live_photo_pairs: int = 0
+    live_photo_metadata_verified: int = 0
+    live_photo_repaired_extensions: int = 0
+    live_photo_ambiguous: int = 0
+    live_photo_rejected: int = 0
     extras_removed: int = 0
     album_groups_merged: int = 0
     dated: int = 0
@@ -228,6 +356,7 @@ class AnalysisResult:
     year_folders: list[Path] = field(default_factory=list)
     album_folders: list[Path] = field(default_factory=list)
     used_fallback_scan: bool = False
+    duplicate_groups: list[DuplicateGroup] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -243,6 +372,9 @@ class PlanAction:
     status: ActionStatus = ActionStatus.PLANNED
     actual_kind: ActionKind | None = None
     error: str = ""
+    bundle_id: str | None = None
+    live_photo_role: LivePhotoRole | None = None
+    size_bytes: int | None = None
 
 
 @dataclass(slots=True)
@@ -263,6 +395,7 @@ class FixDateOptions:
     use_file_mtime: bool = False
     dry_run: bool = False
     include_hidden: bool = False
+    correct_date_filenames: bool = False
     max_exif_bytes: int = DEFAULT_MAX_EXIF_BYTES
 
 
@@ -274,6 +407,8 @@ class FixDateResult:
     updated: int = 0
     unchanged: int = 0
     failed: int = 0
+    rename_candidates: int = 0
+    renamed: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -292,6 +427,28 @@ class TaskContext:
     cancel_event: Event = field(default_factory=Event)
     progress_callback: ProgressCallback | None = None
     log_callback: LogCallback | None = None
+    # JSON 边车索引只在当前任务中存活，避免模块级缓存跨扫描失效。值的具体
+    # 结构由 date_extractors 管理；锁保证多提取线程只扫描同一目录一次。
+    _sidecar_directory_indexes: dict[str, Any] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _sidecar_directory_index_lock: Any = field(
+        default_factory=Lock,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    # 同类 EXIF 环境诊断在一次扫描中只显示一次，避免大量 HEIC 缺解码器时
+    # 日志洪泛。集合随 TaskContext 生命周期结束，不会跨扫描隐藏新问题。
+    _exif_notices: set[str] = field(
+        default_factory=set,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def check_cancelled(self) -> None:
         if self.cancel_event.is_set():

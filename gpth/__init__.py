@@ -4,6 +4,7 @@ from .models import (
     AlbumMode,
     ConflictMode,
     DateDivision,
+    LivePhotoTarget,
     OperationMode,
     OrganizeOptions,
     UnknownDateMode,
@@ -13,9 +14,10 @@ __all__ = [
     "AlbumMode",
     "ConflictMode",
     "DateDivision",
+    "LivePhotoTarget",
     "OperationMode",
     "OrganizeOptions",
     "UnknownDateMode",
 ]
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"

@@ -13,10 +13,12 @@ from .constants import ALBUM_INFO_NAME, DEFAULT_REPORT_NAME
 from .file_utils import (
     OutputDirectoryLock,
     atomic_copy,
+    atomic_copy_bundle,
     available_target,
     conflict_key,
     create_shortcut,
     prepare_file_target,
+    retire_sources_for_move,
     safe_move,
     set_file_time,
 )
@@ -28,8 +30,10 @@ from .models import (
     CancelledError,
     ConflictMode,
     ExecutionResult,
+    LivePhotoRole,
     Phase,
     PlanAction,
+    RunStatistics,
     TaskContext,
     enum_value,
 )
@@ -65,8 +69,44 @@ def _execute_plan_locked(
     reserved_targets = {action.target for action in actions if action.target is not None}
     reserved_target_keys = {conflict_key(target) for target in reserved_targets}
     options.output_dir.mkdir(parents=True, exist_ok=True)
+    bundled_actions: dict[str, list[PlanAction]] = {}
+    for action in actions:
+        if action.bundle_id is not None:
+            bundled_actions.setdefault(action.bundle_id, []).append(action)
+    handled_bundles: set[str] = set()
 
     for index, action in enumerate(actions, start=1):
+        if action.bundle_id is not None:
+            if action.bundle_id in handled_bundles:
+                continue
+            handled_bundles.add(action.bundle_id)
+            bundle = bundled_actions[action.bundle_id]
+            name = action.source.name if action.source else action.reason
+            context.progress(
+                Phase.EXECUTING,
+                index - 1,
+                len(actions),
+                f"正在成组处理实况照片：{name}",
+            )
+            context.check_cancelled()
+            bundle_successes = _execute_live_photo_bundle(
+                bundle,
+                analysis,
+                context,
+                errors,
+            )
+            successful_actions.extend(bundle_successes)
+            successful_targets.update(
+                item.target for item in bundle_successes if item.target is not None
+            )
+            context.progress(
+                Phase.EXECUTING,
+                min(index + len(bundle) - 1, len(actions)),
+                len(actions),
+                f"已处理 {min(index + len(bundle) - 1, len(actions))}/{len(actions)}",
+            )
+            continue
+
         context.check_cancelled()
         name = action.source.name if action.source else action.reason
         context.progress(Phase.EXECUTING, index - 1, len(actions), f"正在处理：{name}")
@@ -97,7 +137,7 @@ def _execute_plan_locked(
                     allow_overwrite=options.conflict_mode is ConflictMode.OVERWRITE,
                 )
                 statistics.copied += 1
-                statistics.bytes_copied += action.media.size or 0
+                statistics.bytes_copied += _action_size(action)
                 action.actual_kind = ActionKind.COPY
             elif action.kind is ActionKind.MOVE:
                 copied_across_volumes = safe_move(
@@ -108,7 +148,7 @@ def _execute_plan_locked(
                     allow_overwrite=options.conflict_mode is ConflictMode.OVERWRITE,
                 )
                 statistics.moved += 1
-                statistics.bytes_copied += action.media.size or 0 if copied_across_volumes else 0
+                statistics.bytes_copied += _action_size(action) if copied_across_volumes else 0
                 action.actual_kind = ActionKind.MOVE
             elif action.kind is ActionKind.SHORTCUT:
                 if action.source not in successful_targets:
@@ -121,7 +161,7 @@ def _execute_plan_locked(
                     )
                     statistics.copied += int(actual_kind is ActionKind.COPY)
                     statistics.moved += int(actual_kind is ActionKind.MOVE)
-                    statistics.bytes_copied += action.media.size or 0 if copied_bytes else 0
+                    statistics.bytes_copied += _action_size(action) if copied_bytes else 0
                     action.actual_kind = actual_kind
                     context.log(
                         "WARNING",
@@ -151,7 +191,7 @@ def _execute_plan_locked(
                         )
                         statistics.copied += int(actual_kind is ActionKind.COPY)
                         statistics.moved += int(actual_kind is ActionKind.MOVE)
-                        statistics.bytes_copied += action.media.size or 0 if copied_bytes else 0
+                        statistics.bytes_copied += _action_size(action) if copied_bytes else 0
                         action.actual_kind = actual_kind
                         context.log(
                             "WARNING",
@@ -190,6 +230,173 @@ def _execute_plan_locked(
     context.check_cancelled()
     context.progress(Phase.FINISHED, len(actions), len(actions), "整理完成")
     return ExecutionResult(analysis, actions, errors)
+
+
+def _execute_live_photo_bundle(
+    bundle: list[PlanAction],
+    analysis: AnalysisResult,
+    context: TaskContext,
+    errors: list[str],
+) -> list[PlanAction]:
+    """成组执行实况照片，并返回真正成功的物理文件操作。"""
+
+    statistics = analysis.statistics
+    if not bundle:
+        return []
+
+    validation_error = _validate_live_photo_bundle(bundle)
+    if validation_error:
+        _mark_bundle_failed(bundle, validation_error, errors, statistics)
+        context.log("ERROR", validation_error)
+        return []
+
+    if all(action.kind is ActionKind.SKIP for action in bundle):
+        for action in bundle:
+            action.status = ActionStatus.SKIPPED
+            action.actual_kind = ActionKind.SKIP
+        statistics.skipped += len(bundle)
+        return []
+
+    kinds = {action.kind for action in bundle}
+    if len(kinds) != 1 or kinds.pop() not in {ActionKind.COPY, ActionKind.MOVE}:
+        message = f"实况照片计划包含不一致操作：{bundle[0].bundle_id}"
+        _mark_bundle_failed(bundle, message, errors, statistics)
+        context.log("ERROR", message)
+        return []
+
+    pairs = [
+        (action.source, action.target)
+        for action in bundle
+        if action.source is not None and action.target is not None
+    ]
+    kind = bundle[0].kind
+    try:
+        atomic_copy_bundle(
+            pairs,
+            context,
+            analysis.options.hash_chunk_size,
+            allow_overwrite=analysis.options.conflict_mode is ConflictMode.OVERWRITE,
+        )
+    except CancelledError:
+        raise
+    except Exception as exc:
+        source_text = " + ".join(str(source) for source, _target in pairs)
+        message = f"成组处理实况照片 {source_text} 失败：{exc}"
+        _mark_bundle_failed(bundle, message, errors, statistics, str(exc))
+        context.log("ERROR", message)
+        return []
+
+    # 成组输出始终是实体复制；即使后续 MOVE 源退役失败，
+    # 报告也应记录已经写入的实际字节数。
+    statistics.bytes_copied += sum(_action_size(action) for action in bundle)
+
+    if kind is ActionKind.COPY:
+        for action in bundle:
+            action.status = ActionStatus.SUCCESS
+            action.actual_kind = ActionKind.COPY
+            if analysis.options.set_file_mtime and action.target is not None:
+                _apply_media_time(action, context)
+        statistics.copied += len(bundle)
+        return list(bundle)
+
+    try:
+        outcomes = retire_sources_for_move([source for source, _target in pairs], context)
+    except CancelledError:
+        raise
+    except Exception as exc:
+        source_text = " + ".join(str(source) for source, _target in pairs)
+        message = f"实况照片目标已输出，但 MOVE 源文件事务失败 {source_text}：{exc}"
+        _mark_bundle_failed(bundle, message, errors, statistics, str(exc))
+        context.log("ERROR", message)
+        return []
+
+    successful: list[PlanAction] = []
+    reported_messages: set[str] = set()
+    for action, outcome in zip(bundle, outcomes, strict=True):
+        if outcome.moved is True:
+            action.status = ActionStatus.SUCCESS
+            action.actual_kind = ActionKind.MOVE
+            statistics.moved += 1
+            successful.append(action)
+        elif outcome.moved is False:
+            action.status = ActionStatus.SUCCESS
+            action.actual_kind = ActionKind.COPY
+            action.error = outcome.message
+            statistics.copied += 1
+            successful.append(action)
+            if outcome.message not in reported_messages:
+                warning = f"MOVE 已安全降级为 COPY：{outcome.message}"
+                errors.append(warning)
+                context.log("WARNING", warning)
+                reported_messages.add(outcome.message)
+        else:
+            action.status = ActionStatus.FAILED
+            action.actual_kind = None
+            action.error = outcome.message
+            statistics.failed += 1
+            if outcome.message not in reported_messages:
+                errors.append(outcome.message)
+                context.log("ERROR", outcome.message)
+                reported_messages.add(outcome.message)
+
+        if action.status is ActionStatus.SUCCESS and analysis.options.set_file_mtime:
+            _apply_media_time(action, context)
+    return successful
+
+
+def _validate_live_photo_bundle(bundle: list[PlanAction]) -> str | None:
+    """验证调用方传入的 bundle 仍是唯一的静态图+动态片段。"""
+
+    bundle_id = bundle[0].bundle_id
+    if (
+        bundle_id is None
+        or len(bundle) != 2
+        or any(action.bundle_id != bundle_id for action in bundle)
+    ):
+        return f"实况照片成组计划必须恰好包含两项：{bundle_id}"
+    if {action.live_photo_role for action in bundle} != {
+        LivePhotoRole.STILL,
+        LivePhotoRole.MOTION,
+    }:
+        return f"实况照片成组计划必须同时包含静态图和动态片段：{bundle_id}"
+    if any(action.source is None for action in bundle):
+        return f"实况照片计划缺少源文件：{bundle_id}"
+
+    source_keys = [conflict_key(action.source) for action in bundle if action.source is not None]
+    if len(set(source_keys)) != 2:
+        return f"实况照片两半的源路径必须彼此唯一：{bundle_id}"
+
+    if all(action.kind is ActionKind.SKIP for action in bundle):
+        return None
+    if any(action.target is None for action in bundle):
+        return f"实况照片计划缺少目标文件：{bundle_id}"
+
+    target_keys = [conflict_key(action.target) for action in bundle if action.target is not None]
+    if len(set(target_keys)) != 2:
+        return f"实况照片两半的目标路径必须彼此唯一：{bundle_id}"
+    if set(source_keys) & set(target_keys):
+        return f"实况照片的源路径与目标路径不能重叠：{bundle_id}"
+    return None
+
+
+def _mark_bundle_failed(
+    bundle: list[PlanAction],
+    message: str,
+    errors: list[str],
+    statistics: RunStatistics,
+    detail: str | None = None,
+) -> None:
+    """把一个复合资产的所有动作统一标记为失败。"""
+
+    for action in bundle:
+        action.status = ActionStatus.FAILED
+        action.error = detail or message
+    errors.append(message)
+    statistics.failed += len(bundle)
+
+
+def _action_size(action: PlanAction) -> int:
+    return action.size_bytes if action.size_bytes is not None else (action.media.size or 0)
 
 
 def _shortcut_fallback(
@@ -281,6 +488,20 @@ def _write_report(
         "version": 1,
         "options": enum_value(asdict(analysis.options)),
         "statistics": enum_value(asdict(analysis.statistics)),
+        "duplicate_groups": enum_value([asdict(group) for group in analysis.duplicate_groups]),
+        "live_photos": [
+            {
+                "album": album,
+                "still": str(item.locations.get(album, item.first_file)),
+                "motion": str(companion),
+                "metadata_status": enum_value(item.live_photo_metadata.get(album)),
+                "evidence": item.live_photo_evidence.get(album),
+                "repaired_suffix": item.live_photo_repaired_suffix.get(album, False),
+                "date": item.date_taken.isoformat() if item.date_taken else None,
+            }
+            for item in analysis.media
+            for album, companion in item.live_photo_companions.items()
+        ],
         "actions": [
             {
                 "planned_kind": action.kind.value,
@@ -291,6 +512,11 @@ def _write_report(
                 "album": action.album,
                 "date": action.media.date_taken.isoformat() if action.media.date_taken else None,
                 "date_source": action.media.date_source.value if action.media.date_source else None,
+                "bundle_id": action.bundle_id,
+                "live_photo_role": (
+                    action.live_photo_role.value if action.live_photo_role else None
+                ),
+                "size_bytes": action.size_bytes,
                 "reason": action.reason,
                 "error": action.error or None,
             }

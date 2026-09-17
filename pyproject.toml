@@ -33,6 +33,7 @@ classifiers = [
 dependencies = [
   "customtkinter>=5.2.2,<6",
   "Pillow>=10.0,<13",
+  "pillow-heif>=1.5,<2",
 ]
 
 [project.urls]

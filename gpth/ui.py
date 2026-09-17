@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import inspect
-import json
 import queue
 import sys
 import threading
 import traceback
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,7 +17,8 @@ from typing import Any
 import customtkinter as ctk
 
 from . import __version__
-from .constants import APP_DISPLAY_NAME, APP_NAME, settings_path
+from .constants import APP_DISPLAY_NAME, APP_NAME
+from .duplicate_view import DuplicatePreviewDialog
 from .models import (
     ActionKind,
     AlbumMode,
@@ -28,6 +27,8 @@ from .models import (
     ConflictMode,
     DateDivision,
     FixDateOptions,
+    LivePhotoRole,
+    LivePhotoTarget,
     OperationMode,
     OrganizeOptions,
     Phase,
@@ -36,6 +37,7 @@ from .models import (
     TaskContext,
     UnknownDateMode,
 )
+from .settings import load_settings, save_settings
 
 APP_VERSION = __version__
 WINDOW_SIZE = "1180x760"
@@ -142,6 +144,12 @@ UNKNOWN_LABELS = {
 }
 UNKNOWN_VALUES = {value.value: label for label, value in UNKNOWN_LABELS.items()}
 
+LIVE_PHOTO_TARGET_LABELS = {
+    "Apple 照片（原始双文件）": LivePhotoTarget.APPLE,
+    "OPPO ColorOS 16（经 O+ 互联）": LivePhotoTarget.COLOROS16,
+}
+LIVE_PHOTO_TARGET_VALUES = {value.value: label for label, value in LIVE_PHOTO_TARGET_LABELS.items()}
+
 ACTION_LABELS = {
     ActionKind.COPY.value: "复制",
     ActionKind.MOVE.value: "移动",
@@ -160,6 +168,28 @@ PHASE_LABELS = {
     Phase.FINISHED.value: "任务完成",
 }
 
+PREVIEW_BATCH_DEFAULT = 300
+PREVIEW_BATCH_MINIMUM = 100
+PREVIEW_BATCH_MAXIMUM = 1000
+
+
+def _format_live_photo_status(statistics: Any) -> tuple[str, str]:
+    """生成实况照片摘要；存在不可确认配对或歧义候选时使用警告色。"""
+
+    pairs = max(int(getattr(statistics, "live_photo_pairs", 0)), 0)
+    verified = min(max(int(getattr(statistics, "live_photo_metadata_verified", 0)), 0), pairs)
+    incomplete = max(pairs - verified, 0)
+    repaired = max(int(getattr(statistics, "live_photo_repaired_extensions", 0)), 0)
+    ambiguous = max(int(getattr(statistics, "live_photo_ambiguous", 0)), 0)
+    rejected = max(int(getattr(statistics, "live_photo_rejected", 0)), 0)
+    headline = f"实况 {pairs:,} 组" if pairs else "未发现可可靠配对的实况照片"
+    color = WARNING if incomplete or ambiguous or rejected else SUCCESS
+    return (
+        f" · {headline} · 完整 {verified:,}/{pairs:,} · 不完整 {incomplete:,}"
+        f" · 后缀恢复 {repaired:,} · 歧义 {ambiguous:,} · 标识冲突拒绝 {rejected:,}",
+        color,
+    )
+
 
 @dataclass(slots=True)
 class _UiEvent:
@@ -167,6 +197,53 @@ class _UiEvent:
 
     kind: str
     payload: Any = None
+
+
+class _LatestProgressSlot:
+    """只保留后台任务最新的一次进度，避免高频回调塞满界面队列。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._value: ProgressUpdate | None = None
+
+    def publish(self, update: ProgressUpdate) -> None:
+        """后台线程写入时直接覆盖旧值；日志和结果事件仍走普通队列。"""
+
+        with self._lock:
+            self._value = update
+
+    def take(self) -> ProgressUpdate | None:
+        """主线程原子取走当前最新值。"""
+
+        with self._lock:
+            value = self._value
+            self._value = None
+        return value
+
+    def clear(self) -> None:
+        """结果事件到达后清空旧进度，防止完成状态被迟到消息覆盖。"""
+
+        with self._lock:
+            self._value = None
+
+
+@dataclass(slots=True)
+class _PreviewBatchCursor:
+    """记录渐进式预览的下一段范围，所有动作最终都会被载入。"""
+
+    total: int
+    batch_size: int
+    index: int = 0
+
+    def take(self) -> tuple[int, int]:
+        start = min(max(self.index, 0), self.total)
+        end = min(start + max(self.batch_size, 1), self.total)
+        self.index = end
+        return start, end
+
+    @property
+    def finished(self) -> bool:
+        return self.index >= self.total
 
 
 class PhotoTakeoutApp(ctk.CTk):
@@ -201,16 +278,23 @@ class PhotoTakeoutApp(ctk.CTk):
         self.configure(fg_color=("#EEF2F7", "#0B1220"))
 
         self._events: queue.Queue[_UiEvent] = queue.Queue()
+        self._latest_progress = _LatestProgressSlot()
+        self._ui_busy = False
         self._worker: threading.Thread | None = None
         self._task_context: TaskContext | None = None
         self._active_task: str | None = None
         self._analysis: AnalysisResult | None = None
         self._plan: list[PlanAction] = []
         self._preview_options: OrganizeOptions | None = None
+        self._duplicate_dialog: DuplicatePreviewDialog | None = None
         self._log_records: list[tuple[str, str, str]] = []
         self._pages: dict[str, ctk.CTkFrame] = {}
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
         self._stat_values: dict[str, ctk.CTkLabel] = {}
+        self._options_expanded = True
+        self._preview_render_generation = 0
+        self._preview_render_actions: list[PlanAction] = []
+        self._preview_batch_cursor: _PreviewBatchCursor | None = None
 
         self._create_variables()
         self._build_shell()
@@ -275,6 +359,21 @@ class PhotoTakeoutApp(ctk.CTk):
             value=bool(self._settings.get("include_hidden", False))
         )
         self.write_report_var = ctk.BooleanVar(value=bool(self._settings.get("write_report", True)))
+        self.use_hash_cache_var = ctk.BooleanVar(
+            value=bool(self._settings.get("use_hash_cache", True))
+        )
+        self.recognize_live_photos_var = ctk.BooleanVar(
+            value=bool(self._settings.get("recognize_live_photos", False))
+        )
+        self.correct_date_filenames_var = ctk.BooleanVar(
+            value=bool(self._settings.get("correct_date_filenames", False))
+        )
+        live_photo_target = self._settings.get("live_photo_target", LivePhotoTarget.APPLE.value)
+        self.live_photo_target_var = ctk.StringVar(
+            value=LIVE_PHOTO_TARGET_VALUES.get(
+                str(live_photo_target), next(iter(LIVE_PHOTO_TARGET_LABELS))
+            )
+        )
         self.workers_var = ctk.StringVar(value=str(self._settings.get("workers", 4)))
         self.all_photos_var = ctk.StringVar(
             value=self._settings.get("all_photos_folder", "ALL_PHOTOS")
@@ -299,10 +398,15 @@ class PhotoTakeoutApp(ctk.CTk):
             value=bool(self._settings.get("fix_include_hidden", False))
         )
         self.fix_dry_run_var = ctk.BooleanVar(value=bool(self._settings.get("fix_dry_run", False)))
+        self.fix_correct_date_filenames_var = ctk.BooleanVar(
+            value=bool(self._settings.get("fix_correct_date_filenames", False))
+        )
 
         self.appearance_var = ctk.StringVar(value=self._settings.get("appearance", "System"))
         self.scaling_var = ctk.StringVar(value=f"{int(self._initial_scaling * 100)}%")
-        self.preview_limit_var = ctk.StringVar(value=str(self._settings.get("preview_limit", 2000)))
+        self.preview_limit_var = ctk.StringVar(
+            value=str(self._settings.get("preview_limit", PREVIEW_BATCH_DEFAULT))
+        )
         self.remember_paths_var = ctk.BooleanVar(value=remember_paths)
         self.log_filter_var = ctk.StringVar(value="全部")
 
@@ -437,6 +541,15 @@ class PhotoTakeoutApp(ctk.CTk):
             font=ctk.CTkFont(size=13),
             anchor="w",
         ).grid(row=1, column=0, pady=(4, 0), sticky="w")
+        self.options_toggle_button = ctk.CTkButton(
+            header,
+            text="收起选项",
+            width=96,
+            height=32,
+            **SECONDARY_BUTTON_STYLE,
+            command=self._toggle_options,
+        )
+        self.options_toggle_button.grid(row=0, column=1, rowspan=2, padx=(12, 0), sticky="e")
 
         path_card = ctk.CTkFrame(page, fg_color=CARD_COLOR, corner_radius=14)
         path_card.grid(row=1, column=0, padx=28, pady=(0, 10), sticky="ew")
@@ -446,7 +559,7 @@ class PhotoTakeoutApp(ctk.CTk):
 
         options = ctk.CTkTabview(
             page,
-            height=182,
+            height=244,
             corner_radius=14,
             fg_color=CARD_COLOR,
             **TABVIEW_STYLE,
@@ -457,6 +570,7 @@ class PhotoTakeoutApp(ctk.CTk):
         self._build_basic_options(basic)
         self._build_advanced_options(advanced)
         options.set("基础选项")
+        self.organize_options = options
 
         stats = ctk.CTkFrame(page, fg_color="transparent")
         stats.grid(row=3, column=0, padx=28, pady=(0, 10), sticky="ew")
@@ -465,7 +579,7 @@ class PhotoTakeoutApp(ctk.CTk):
         stat_specs = (
             ("discovered", "发现媒体"),
             ("unique", "去重后"),
-            ("duplicates", "重复项"),
+            ("duplicates", "重复组"),
             ("unknown", "日期未知"),
             ("actions", "计划动作"),
         )
@@ -502,7 +616,17 @@ class PhotoTakeoutApp(ctk.CTk):
             text_color=MUTED_TEXT,
             font=ctk.CTkFont(size=11),
         )
-        self.preview_hint.grid(row=0, column=1, sticky="e")
+        self.duplicate_button = ctk.CTkButton(
+            preview_head,
+            text="重复项对比",
+            width=126,
+            height=30,
+            state="disabled",
+            **SECONDARY_BUTTON_STYLE,
+            command=self._open_duplicate_comparison,
+        )
+        self.duplicate_button.grid(row=0, column=1, padx=(10, 12), sticky="e")
+        self.preview_hint.grid(row=0, column=2, sticky="e")
 
         table_frame = ctk.CTkFrame(preview_card, fg_color="transparent")
         table_frame.grid(row=1, column=0, padx=14, pady=(0, 12), sticky="nsew")
@@ -532,9 +656,20 @@ class PhotoTakeoutApp(ctk.CTk):
             command=self.preview_tree.yview,
             **SCROLLBAR_STYLE,
         )
-        self.preview_tree.configure(yscrollcommand=self.preview_scrollbar.set)
+        self.preview_x_scrollbar = ctk.CTkScrollbar(
+            table_frame,
+            orientation="horizontal",
+            command=self.preview_tree.xview,
+            height=12,
+            **SCROLLBAR_STYLE,
+        )
+        self.preview_tree.configure(
+            yscrollcommand=self.preview_scrollbar.set,
+            xscrollcommand=self.preview_x_scrollbar.set,
+        )
         self.preview_tree.grid(row=0, column=0, sticky="nsew")
         self.preview_scrollbar.grid(row=0, column=1, padx=(4, 0), sticky="ns")
+        self.preview_x_scrollbar.grid(row=1, column=0, pady=(4, 0), sticky="ew")
 
         controls = ctk.CTkFrame(page, fg_color=CARD_COLOR, corner_radius=14)
         controls.grid(row=5, column=0, padx=28, pady=(0, 22), sticky="ew")
@@ -547,6 +682,8 @@ class PhotoTakeoutApp(ctk.CTk):
             text="准备就绪",
             text_color=MUTED_TEXT,
             anchor="w",
+            justify="left",
+            wraplength=330,
             font=ctk.CTkFont(size=11),
         )
         self.organize_status.grid(row=0, column=0, sticky="ew")
@@ -592,6 +729,23 @@ class PhotoTakeoutApp(ctk.CTk):
             command=self._cancel_task,
         )
         self.cancel_button.grid(row=0, column=2, padx=(4, 0))
+
+    def _toggle_options(self) -> None:
+        """让用户随时展开或收起整理选项。"""
+
+        self._set_options_expanded(not self._options_expanded)
+
+    def _set_options_expanded(self, expanded: bool) -> None:
+        """收起固定高度选项区，为执行计划表释放垂直空间。"""
+
+        self._options_expanded = bool(expanded)
+        if self._options_expanded:
+            self.organize_options.grid()
+            self.options_toggle_button.configure(text="收起选项")
+        else:
+            # grid_remove 会保留原网格参数，重新展开时不会发生布局跳位。
+            self.organize_options.grid_remove()
+            self.options_toggle_button.configure(text="展开选项")
 
     def _path_row(
         self,
@@ -683,6 +837,23 @@ class PhotoTakeoutApp(ctk.CTk):
             font=ctk.CTkFont(size=11),
         ).grid(row=2, column=2, padx=10, pady=(8, 10), sticky="w")
 
+        ctk.CTkCheckBox(
+            parent,
+            text="按拍摄日期修正日期型文件名",
+            variable=self.correct_date_filenames_var,
+            checkbox_width=18,
+            checkbox_height=18,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            **CHECKBOX_STYLE,
+        ).grid(row=3, column=0, padx=14, pady=(2, 0), sticky="w")
+        ctk.CTkLabel(
+            parent,
+            text="仅处理完整日期型名称 YYYY-MM-DD(编号)，保留编号和扩展名；默认关闭。",
+            text_color=MUTED_TEXT,
+            font=ctk.CTkFont(size=10),
+            anchor="w",
+        ).grid(row=3, column=1, columnspan=2, padx=(10, 14), pady=(2, 0), sticky="w")
+
     def _build_advanced_options(self, parent: ctk.CTkFrame) -> None:
         parent.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="advanced")
 
@@ -729,6 +900,7 @@ class PhotoTakeoutApp(ctk.CTk):
 
         sources = ctk.CTkFrame(parent, fg_color="transparent")
         sources.grid(row=2, column=0, columnspan=4, padx=14, pady=(10, 8), sticky="ew")
+        sources.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="sources")
         source_specs = (
             ("JSON", self.use_json_var),
             ("EXIF", self.use_exif_var),
@@ -737,8 +909,9 @@ class PhotoTakeoutApp(ctk.CTk):
             ("文件原修改时间", self.use_file_mtime_var),
             ("无 Takeout 结构时扫描全部", self.scan_fallback_var),
             ("包含隐藏文件", self.include_hidden_var),
+            ("复用未变化文件指纹", self.use_hash_cache_var),
         )
-        for column, (text, variable) in enumerate(source_specs):
+        for index, (text, variable) in enumerate(source_specs):
             ctk.CTkCheckBox(
                 sources,
                 text=text,
@@ -749,7 +922,94 @@ class PhotoTakeoutApp(ctk.CTk):
                 corner_radius=5,
                 font=ctk.CTkFont(size=10),
                 **CHECKBOX_STYLE,
-            ).grid(row=0, column=column, padx=(0, 16), sticky="w")
+            ).grid(
+                row=index // 4,
+                column=index % 4,
+                padx=(0, 18),
+                pady=(0, 7) if index < 4 else 0,
+                sticky="w",
+            )
+
+        self.live_photo_checkbox = ctk.CTkCheckBox(
+            sources,
+            text="识别并配对实况照片（Live Photo）",
+            variable=self.recognize_live_photos_var,
+            width=20,
+            checkbox_width=18,
+            checkbox_height=18,
+            corner_radius=5,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=self._sync_live_photo_controls,
+            **CHECKBOX_STYLE,
+        )
+        self.live_photo_checkbox.grid(
+            row=2, column=0, columnspan=2, padx=(0, 18), pady=(9, 0), sticky="w"
+        )
+
+        target_controls = ctk.CTkFrame(sources, fg_color="transparent")
+        target_controls.grid(row=2, column=2, columnspan=2, padx=(0, 0), pady=(9, 0), sticky="ew")
+        target_controls.grid_columnconfigure(1, weight=1)
+        self.live_photo_target_label = ctk.CTkLabel(
+            target_controls,
+            text="后续导入方式",
+            text_color=MUTED_TEXT,
+            font=ctk.CTkFont(size=9),
+        )
+        self.live_photo_target_label.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        self.live_photo_target_menu = ctk.CTkOptionMenu(
+            target_controls,
+            values=list(LIVE_PHOTO_TARGET_LABELS),
+            variable=self.live_photo_target_var,
+            height=29,
+            font=ctk.CTkFont(size=10),
+            command=lambda _value: self._sync_live_photo_controls(),
+            **OPTION_MENU_STYLE,
+        )
+        self.live_photo_target_menu.grid(
+            row=0,
+            column=1,
+            padx=0,
+            pady=0,
+            sticky="ew",
+        )
+        self.live_photo_hint = ctk.CTkLabel(
+            sources,
+            text="按内容识别；不转码、不把真 MP3 当动态片段",
+            text_color=MUTED_TEXT,
+            font=ctk.CTkFont(size=9),
+            anchor="w",
+            justify="left",
+            wraplength=610,
+        )
+        self.live_photo_hint.grid(row=3, column=0, columnspan=4, padx=0, pady=(6, 0), sticky="ew")
+        self._sync_live_photo_controls()
+
+    def _sync_live_photo_controls(self) -> None:
+        """勾选关闭时弱化目标选择，但保留用户上次的平台。"""
+
+        enabled = self.recognize_live_photos_var.get()
+        busy = self._ui_busy
+        if hasattr(self, "live_photo_checkbox"):
+            self.live_photo_checkbox.configure(state="disabled" if busy else "normal")
+        if hasattr(self, "live_photo_target_menu"):
+            self.live_photo_target_menu.configure(
+                state="normal" if enabled and not busy else "disabled"
+            )
+        if hasattr(self, "live_photo_hint"):
+            target = LIVE_PHOTO_TARGET_LABELS.get(
+                self.live_photo_target_var.get(), LivePhotoTarget.APPLE
+            )
+            hint = (
+                "两项均输出 Apple 原始双文件；不转码，真 MP3 只做内容探测且不纳入整理。"
+                "Apple“照片”需同时导入两半。"
+                if target is LivePhotoTarget.APPLE
+                else "两项均输出 Apple 原始双文件；不转码，真 MP3 只做内容探测且不纳入整理。"
+                "ColorOS 需经 O+ 互联传输。"
+            )
+            self.live_photo_hint.configure(
+                text=hint,
+                text_color=(MUTED_TEXT if enabled and not busy else ("#667085", "#7C8798")),
+            )
 
     @staticmethod
     def _option_label(parent: ctk.CTkFrame, text: str, row: int, column: int) -> None:
@@ -766,7 +1026,7 @@ class PhotoTakeoutApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_fix_page(self) -> None:
-        """构建仅修改文件时间的独立页面。"""
+        """构建修改文件时间及可选修正日期型文件名的独立页面。"""
 
         page = self._new_page("fix")
         page.grid_columnconfigure(0, weight=1)
@@ -775,7 +1035,7 @@ class PhotoTakeoutApp(ctk.CTk):
         self._page_header(
             page,
             "修复文件拍摄日期",
-            "不整理目录，仅根据 JSON、EXIF 或文件名修正现有媒体的修改时间。",
+            "不重组目录；修正媒体修改时间，也可安全修正错误的日期型文件名。",
         )
 
         path_card = ctk.CTkFrame(page, fg_color=CARD_COLOR, corner_radius=14)
@@ -834,9 +1094,21 @@ class PhotoTakeoutApp(ctk.CTk):
             variable=self.fix_hidden_var,
             progress_color=PRIMARY,
         ).pack(anchor="w", padx=18, pady=8)
+        ctk.CTkCheckBox(
+            behavior,
+            text="按拍摄日期修正日期型文件名",
+            variable=self.fix_correct_date_filenames_var,
+            checkbox_width=19,
+            checkbox_height=19,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            **CHECKBOX_STYLE,
+        ).pack(anchor="w", padx=18, pady=(8, 3))
         ctk.CTkLabel(
             behavior,
-            text="建议首次先启用“仅预演”。\n无法确定日期的文件会保持原样，错误会记录在日志页。",
+            text=(
+                "重命名仅针对完整日期型名称 YYYY-MM-DD(编号)，\n"
+                "保留编号和扩展名；建议首次先启用“仅预演”。"
+            ),
             justify="left",
             text_color=MUTED_TEXT,
             font=ctk.CTkFont(size=11),
@@ -991,19 +1263,40 @@ class PhotoTakeoutApp(ctk.CTk):
             command=self._change_scaling,
             **OPTION_MENU_STYLE,
         ).grid(row=2, column=1, padx=18, pady=7, sticky="ew")
-        self._settings_row(settings_card, 3, "预览行数上限")
+        self._settings_row(settings_card, 3, "每批预览行数")
         ctk.CTkOptionMenu(
             settings_card,
-            values=["500", "1000", "2000", "5000"],
+            values=["100", "300", "500", "1000"],
             variable=self.preview_limit_var,
             **OPTION_MENU_STYLE,
         ).grid(row=3, column=1, padx=18, pady=7, sticky="ew")
+        self._settings_row(settings_card, 4, "扫描指纹缓存")
+        cache_controls = ctk.CTkFrame(settings_card, fg_color="transparent")
+        cache_controls.grid(row=4, column=1, padx=18, pady=7, sticky="ew")
+        cache_controls.grid_columnconfigure(0, weight=1)
+        self.cache_status_label = ctk.CTkLabel(
+            cache_controls,
+            text="仅保存路径、文件状态与 SHA-256",
+            text_color=MUTED_TEXT,
+            font=ctk.CTkFont(size=10),
+            anchor="w",
+        )
+        self.cache_status_label.grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        self.clear_cache_button = ctk.CTkButton(
+            cache_controls,
+            text="清理",
+            width=62,
+            height=28,
+            **SECONDARY_BUTTON_STYLE,
+            command=self._clear_hash_cache,
+        )
+        self.clear_cache_button.grid(row=0, column=1, sticky="e")
         ctk.CTkSwitch(
             settings_card,
             text="记住最近使用的目录",
             variable=self.remember_paths_var,
             progress_color=PRIMARY,
-        ).grid(row=4, column=0, columnspan=2, padx=18, pady=(14, 18), sticky="w")
+        ).grid(row=5, column=0, columnspan=2, padx=18, pady=(14, 18), sticky="w")
 
         about_card = ctk.CTkFrame(page, fg_color=CARD_COLOR, corner_radius=14)
         about_card.grid(row=1, column=1, padx=(7, 28), pady=(0, 12), sticky="nsew")
@@ -1113,9 +1406,13 @@ class PhotoTakeoutApp(ctk.CTk):
                 aggressive_json=self.aggressive_json_var.get(),
                 use_file_mtime=self.use_file_mtime_var.get(),
                 set_file_mtime=self.set_mtime_var.get(),
+                correct_date_filenames=self.correct_date_filenames_var.get(),
                 scan_all_if_no_takeout=self.scan_fallback_var.get(),
                 include_hidden=self.include_hidden_var.get(),
                 write_report=self.write_report_var.get(),
+                use_hash_cache=self.use_hash_cache_var.get(),
+                recognize_live_photos=self.recognize_live_photos_var.get(),
+                live_photo_target=LIVE_PHOTO_TARGET_LABELS[self.live_photo_target_var.get()],
                 all_photos_folder=self.all_photos_var.get(),
                 unknown_date_folder=self.unknown_folder_var.get(),
                 workers=int(self.workers_var.get()),
@@ -1158,6 +1455,7 @@ class PhotoTakeoutApp(ctk.CTk):
             use_file_mtime=self.fix_file_mtime_var.get(),
             dry_run=self.fix_dry_run_var.get(),
             include_hidden=self.fix_hidden_var.get(),
+            correct_date_filenames=self.fix_correct_date_filenames_var.get(),
         )
 
     # ------------------------------------------------------------------
@@ -1281,8 +1579,10 @@ class PhotoTakeoutApp(ctk.CTk):
             )
             return
 
+        # 进度只需要显示最新值；逐条入队会在数万文件时拖慢 Tk 主线程。
+        self._latest_progress.clear()
         context = TaskContext(
-            progress_callback=lambda update: self._events.put(_UiEvent("progress", update)),
+            progress_callback=self._latest_progress.publish,
             log_callback=lambda level, message: self._events.put(_UiEvent("log", (level, message))),
         )
         self._task_context = context
@@ -1326,6 +1626,9 @@ class PhotoTakeoutApp(ctk.CTk):
         """仅在 Tk 主线程消费后台消息并更新控件。"""
 
         try:
+            latest_progress = self._latest_progress.take()
+            if latest_progress is not None and self._ui_busy:
+                self._update_progress(latest_progress)
             for _ in range(250):
                 try:
                     event = self._events.get_nowait()
@@ -1337,12 +1640,11 @@ class PhotoTakeoutApp(ctk.CTk):
                 self.after(70, self._poll_events)
 
     def _handle_event(self, event: _UiEvent) -> None:
-        if event.kind == "progress":
-            self._update_progress(event.payload)
-        elif event.kind == "log":
+        if event.kind == "log":
             level, message = event.payload
             self._append_log(str(level), str(message))
         elif event.kind == "analysis_result":
+            self._latest_progress.clear()
             analysis, actions, options = event.payload
             self._analysis = analysis
             self._plan = list(actions)
@@ -1350,10 +1652,13 @@ class PhotoTakeoutApp(ctk.CTk):
             self._show_analysis(analysis, self._plan)
             self._append_log("INFO", f"预览已生成，共 {len(self._plan)} 个计划动作")
         elif event.kind == "execution_result":
+            self._latest_progress.clear()
             self._show_execution_result(event.payload)
         elif event.kind == "fix_result":
+            self._latest_progress.clear()
             self._show_fix_result(event.payload)
         elif event.kind == "cancelled":
+            self._latest_progress.clear()
             self.organize_status.configure(text="任务已取消", text_color=WARNING)
             self.fix_status.configure(text="任务已取消", text_color=WARNING)
             self._append_log("WARNING", str(event.payload) or "任务已取消")
@@ -1361,12 +1666,14 @@ class PhotoTakeoutApp(ctk.CTk):
                 "任务已取消", "任务已安全停止。已完成的独立文件会保留。", parent=self
             )
         elif event.kind == "error":
+            self._latest_progress.clear()
             message, details = event.payload
             self.organize_status.configure(text="任务失败，请查看日志", text_color=DANGER)
             self.fix_status.configure(text="任务失败，请查看日志", text_color=DANGER)
             self._append_log("ERROR", f"{message}\n{details}")
             messagebox.showerror("任务失败", f"{message}\n\n详细信息已写入日志页。", parent=self)
         elif event.kind == "task_finished":
+            self._latest_progress.clear()
             self._set_busy(False)
 
     def _update_progress(self, update: ProgressUpdate) -> None:
@@ -1388,32 +1695,126 @@ class PhotoTakeoutApp(ctk.CTk):
         statistics = analysis.statistics
         self._stat_values["discovered"].configure(text=f"{statistics.discovered:,}")
         self._stat_values["unique"].configure(text=f"{len(analysis.media):,}")
-        self._stat_values["duplicates"].configure(text=f"{statistics.duplicates_removed:,}")
+        duplicate_groups = list(analysis.duplicate_groups)
+        self._stat_values["duplicates"].configure(text=f"{len(duplicate_groups):,} 组")
         self._stat_values["unknown"].configure(text=f"{statistics.unknown_dates:,}")
         planned = statistics.planned_actions or len(actions)
         self._stat_values["actions"].configure(text=f"{planned:,}")
+        self.duplicate_button.configure(
+            text=f"重复项对比 · {len(duplicate_groups):,} 组",
+            state="normal" if duplicate_groups else "disabled",
+        )
 
-        self._clear_tree()
-        limit = self._bounded_int(self.preview_limit_var.get(), 2000, 100, 20_000)
-        for index, action in enumerate(actions[:limit]):
-            kind = getattr(action.kind, "value", str(action.kind))
-            source = str(action.source or "—")
-            target = str(action.target or "—")
-            date_taken = getattr(action.media, "date_taken", None)
-            date_text = date_taken.strftime("%Y-%m-%d %H:%M:%S") if date_taken else "未知"
-            album = action.album or "时间线"
-            self.preview_tree.insert(
-                "",
-                "end",
-                iid=f"plan-{index}",
-                values=(ACTION_LABELS.get(kind, kind), source, target, date_text, album),
-            )
-        if len(actions) > limit:
-            self.preview_hint.configure(text=f"共 {len(actions):,} 项，当前展示前 {limit:,} 项")
-        else:
-            self.preview_hint.configure(text=f"共 {len(actions):,} 项")
+        self._start_preview_render(actions)
         self.organize_progress.set(1)
-        self.organize_status.configure(text="预览已完成，可检查计划后开始整理", text_color=SUCCESS)
+        cache_suffix = (
+            f" · 缓存复用 {statistics.hash_cache_hits:,}" if statistics.hash_cache_hits else ""
+        )
+        live_photo_suffix = ""
+        status_color = SUCCESS
+        if analysis.options.recognize_live_photos:
+            live_photo_suffix, status_color = _format_live_photo_status(statistics)
+        self.organize_status.configure(
+            text=(f"预览完成{cache_suffix}{live_photo_suffix}"),
+            text_color=status_color,
+        )
+        # 扫描结束默认释放 244px 高度，执行计划在常见窗口尺寸下可完整显示。
+        self._set_options_expanded(False)
+
+    def _start_preview_render(self, actions: list[PlanAction]) -> None:
+        """分批载入全部计划，避免一次插入上万行时冻结 Tk。"""
+
+        self._preview_render_generation += 1
+        generation = self._preview_render_generation
+        self._preview_render_actions = actions
+        batch_size = self._bounded_int(
+            self.preview_limit_var.get(),
+            PREVIEW_BATCH_DEFAULT,
+            PREVIEW_BATCH_MINIMUM,
+            PREVIEW_BATCH_MAXIMUM,
+        )
+        self._preview_batch_cursor = _PreviewBatchCursor(len(actions), batch_size)
+        self._clear_tree(cancel_render=False)
+        if not actions:
+            self.preview_hint.configure(text="共 0 项")
+            return
+        self.preview_hint.configure(text=f"正在载入 0 / {len(actions):,} 项…")
+        self.after(1, lambda: self._render_preview_batch(generation))
+
+    def _render_preview_batch(self, generation: int) -> None:
+        """在短小的主线程切片中写入一批行，然后把控制权还给事件循环。"""
+
+        if generation != self._preview_render_generation:
+            return
+        cursor = self._preview_batch_cursor
+        if cursor is None:
+            return
+        start, end = cursor.take()
+        for index in range(start, end):
+            self._insert_preview_action(index, self._preview_render_actions[index])
+
+        total = cursor.total
+        if cursor.finished:
+            self.preview_hint.configure(text=f"共 {total:,} 项，已全部载入")
+            self._preview_render_actions = []
+            self._preview_batch_cursor = None
+            return
+
+        self.preview_hint.configure(text=f"正在载入 {end:,} / {total:,} 项…")
+        self.after(1, lambda: self._render_preview_batch(generation))
+
+    def _insert_preview_action(self, index: int, action: PlanAction) -> None:
+        """把单个计划动作转换为表格行。"""
+
+        kind = getattr(action.kind, "value", str(action.kind))
+        action_label = ACTION_LABELS.get(kind, kind)
+        if action.live_photo_role is LivePhotoRole.STILL:
+            action_label += " · 实况静态图"
+        elif action.live_photo_role is LivePhotoRole.MOTION:
+            action_label += " · 动态片段"
+        source = str(action.source or "—")
+        target = str(action.target or "—")
+        date_taken = getattr(action.media, "date_taken", None)
+        date_text = date_taken.strftime("%Y-%m-%d %H:%M:%S") if date_taken else "未知"
+        album = action.album or "时间线"
+        self.preview_tree.insert(
+            "",
+            "end",
+            iid=f"plan-{index}",
+            values=(action_label, source, target, date_text, album),
+        )
+
+    def _open_duplicate_comparison(self) -> None:
+        """打开当前扫描结果的只读重复文件对比窗口。"""
+
+        groups = list(self._analysis.duplicate_groups) if self._analysis is not None else []
+        if not groups:
+            messagebox.showinfo("没有重复项", "当前扫描结果中没有内容完全相同的文件。", parent=self)
+            return
+        dialog = self._duplicate_dialog
+        if dialog is not None:
+            try:
+                if dialog.winfo_exists():
+                    dialog.deiconify()
+                    dialog.lift()
+                    dialog.focus_force()
+                    return
+            except Exception:
+                pass
+        self._duplicate_dialog = DuplicatePreviewDialog(self, groups)
+
+    def _close_duplicate_dialog(self) -> None:
+        """使重复项窗口与当前分析结果保持一致。"""
+
+        dialog = self._duplicate_dialog
+        self._duplicate_dialog = None
+        if dialog is None:
+            return
+        try:
+            dialog.close()
+        except Exception:
+            # 主窗口关闭或重新扫描不能被一个已经销毁的子窗口阻塞。
+            pass
 
     def _show_execution_result(self, result: Any) -> None:
         analysis = getattr(result, "analysis", self._analysis)
@@ -1440,9 +1841,11 @@ class PhotoTakeoutApp(ctk.CTk):
             getattr(analysis, "options", None), "output_dir", self.output_var.get()
         )
         # 执行后源目录可能已因“移动”发生变化，旧计划不能再次复用。
+        self._close_duplicate_dialog()
         self._analysis = None
         self._plan = []
         self._preview_options = None
+        self.duplicate_button.configure(text="重复项对比", state="disabled")
         messagebox.showinfo("整理完成", f"{summary}\n\n输出目录：\n{output_dir}", parent=self)
 
     def _show_fix_result(self, result: Any) -> None:
@@ -1450,10 +1853,14 @@ class PhotoTakeoutApp(ctk.CTk):
         updated = int(getattr(result, "updated", 0))
         unchanged = int(getattr(result, "unchanged", 0))
         failed = int(getattr(result, "failed", 0))
+        renamed = int(getattr(result, "renamed", 0))
+        rename_candidates = int(getattr(result, "rename_candidates", 0))
         errors = list(getattr(result, "errors", []) or [])
         text = (
             f"扫描文件：{total:,}\n"
             f"{'预计可更新' if self.fix_dry_run_var.get() else '已更新时间'}：{updated:,}\n"
+            f"{'预计可重命名' if self.fix_dry_run_var.get() else '已重命名'}："
+            f"{rename_candidates if self.fix_dry_run_var.get() else renamed:,}\n"
             f"保持不变：{unchanged:,}\n"
             f"失败：{failed:,}"
         )
@@ -1472,27 +1879,42 @@ class PhotoTakeoutApp(ctk.CTk):
         messagebox.showinfo("日期修复完成", text.split("\n\n", 1)[0], parent=self)
 
     def _clear_preview(self) -> None:
+        self._close_duplicate_dialog()
         self._analysis = None
         self._plan = []
         self._preview_options = None
         self._clear_tree()
         self.preview_hint.configure(text="正在生成预览…")
+        self.duplicate_button.configure(text="重复项对比", state="disabled")
         for label in self._stat_values.values():
             label.configure(text="—")
 
-    def _clear_tree(self) -> None:
+    def _clear_tree(self, *, cancel_render: bool = True) -> None:
+        if cancel_render:
+            # 旧 after 回调可能仍在事件队列中；代次变化后它会自行退出。
+            self._preview_render_generation += 1
+            self._preview_render_actions = []
+            self._preview_batch_cursor = None
         children = self.preview_tree.get_children()
         if children:
             self.preview_tree.delete(*children)
 
     def _set_busy(self, busy: bool) -> None:
+        self._ui_busy = busy
         state = "disabled" if busy else "normal"
         self.analyze_button.configure(state=state)
         self.execute_button.configure(state=state)
         self.fix_button.configure(state=state)
+        self.clear_cache_button.configure(state=state)
+        self._sync_live_photo_controls()
+        has_duplicates = bool(self._analysis and self._analysis.duplicate_groups)
+        self.duplicate_button.configure(
+            state="disabled" if busy or not has_duplicates else "normal"
+        )
         self.cancel_button.configure(state="normal" if busy else "disabled")
         self.fix_cancel_button.configure(state="normal" if busy else "disabled")
         if not busy:
+            self._latest_progress.clear()
             self._task_context = None
             self._active_task = None
 
@@ -1548,6 +1970,34 @@ class PhotoTakeoutApp(ctk.CTk):
             return
         messagebox.showinfo("导出完成", f"日志已保存到：\n{path}", parent=self)
 
+    def _clear_hash_cache(self) -> None:
+        """清理可重新生成的文件指纹缓存，不接触任何照片。"""
+
+        from .scan_cache import HashCache
+
+        cache = HashCache()
+        count = cache.entry_count
+        if count <= 0:
+            self.cache_status_label.configure(text="缓存当前为空")
+            messagebox.showinfo("扫描缓存", "当前没有可清理的文件指纹缓存。", parent=self)
+            return
+        if not messagebox.askyesno(
+            "清理扫描缓存",
+            f"将清理 {count:,} 条文件指纹记录。照片和扫描结果不会被删除；下次扫描会重新计算。",
+            parent=self,
+        ):
+            return
+        if not cache.clear():
+            self.cache_status_label.configure(text="缓存文件当前无法删除")
+            messagebox.showerror(
+                "清理失败",
+                "缓存文件可能正被占用或配置目录不可写。请关闭其它任务后重试。",
+                parent=self,
+            )
+            return
+        self.cache_status_label.configure(text=f"已清理 {count:,} 条指纹记录")
+        self._append_log("INFO", f"已清理 {count:,} 条扫描指纹缓存")
+
     def _change_appearance(self, value: str) -> None:
         ctk.set_appearance_mode(value)
         self.after(40, self._configure_tree_style)
@@ -1593,12 +2043,7 @@ class PhotoTakeoutApp(ctk.CTk):
 
     @staticmethod
     def _load_settings() -> dict[str, Any]:
-        path = settings_path()
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return {}
+        return load_settings()
 
     @staticmethod
     def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -1610,15 +2055,19 @@ class PhotoTakeoutApp(ctk.CTk):
             return default
 
     def _save_settings(self) -> None:
-        """用临时文件原子保存设置，避免异常退出留下半份 JSON。"""
+        """通过统一设置模块原子保存界面状态。"""
 
         geometry = self.geometry()
         data: dict[str, Any] = {
-            "schema_version": 1,
             "geometry": geometry,
             "appearance": self.appearance_var.get(),
             "scaling": self._bounded_int(self.scaling_var.get().rstrip("%"), 100, 80, 150) / 100,
-            "preview_limit": self._bounded_int(self.preview_limit_var.get(), 2000, 100, 20_000),
+            "preview_limit": self._bounded_int(
+                self.preview_limit_var.get(),
+                PREVIEW_BATCH_DEFAULT,
+                PREVIEW_BATCH_MINIMUM,
+                PREVIEW_BATCH_MAXIMUM,
+            ),
             "remember_paths": self.remember_paths_var.get(),
             "operation": OperationMode.COPY.value
             if self.operation_var.get() == "复制（推荐）"
@@ -1637,6 +2086,10 @@ class PhotoTakeoutApp(ctk.CTk):
             "scan_all_if_no_takeout": self.scan_fallback_var.get(),
             "include_hidden": self.include_hidden_var.get(),
             "write_report": self.write_report_var.get(),
+            "use_hash_cache": self.use_hash_cache_var.get(),
+            "recognize_live_photos": self.recognize_live_photos_var.get(),
+            "live_photo_target": LIVE_PHOTO_TARGET_LABELS[self.live_photo_target_var.get()].value,
+            "correct_date_filenames": self.correct_date_filenames_var.get(),
             "workers": self._bounded_int(self.workers_var.get(), 4, 1, 32),
             "all_photos_folder": self.all_photos_var.get(),
             "unknown_date_folder": self.unknown_folder_var.get(),
@@ -1648,6 +2101,7 @@ class PhotoTakeoutApp(ctk.CTk):
             "fix_file_mtime": self.fix_file_mtime_var.get(),
             "fix_include_hidden": self.fix_hidden_var.get(),
             "fix_dry_run": self.fix_dry_run_var.get(),
+            "fix_correct_date_filenames": self.fix_correct_date_filenames_var.get(),
         }
         if self.remember_paths_var.get():
             data.update(
@@ -1657,16 +2111,10 @@ class PhotoTakeoutApp(ctk.CTk):
                     "fix_dir": self.fix_dir_var.get(),
                 }
             )
-        path = settings_path()
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(path)
+            save_settings(data)
         except OSError:
             pass
-        finally:
-            temporary.unlink(missing_ok=True)
 
     def _on_close(self) -> None:
         if self._worker is not None and self._worker.is_alive():
@@ -1679,6 +2127,7 @@ class PhotoTakeoutApp(ctk.CTk):
                 return
             if self._task_context is not None:
                 self._task_context.cancel_event.set()
+        self._close_duplicate_dialog()
         self._save_settings()
         self.destroy()
 

@@ -15,6 +15,7 @@ from .models import (
     ConflictMode,
     DateDivision,
     FixDateOptions,
+    LivePhotoTarget,
     OperationMode,
     OrganizeOptions,
     Phase,
@@ -96,10 +97,34 @@ def _add_organize_arguments(parser: argparse.ArgumentParser, *, safe_defaults: b
     )
     parser.add_argument("--no-set-mtime", action="store_true", help="输出后不重设修改时间")
     parser.add_argument(
+        "--correct-date-filenames",
+        action="store_true",
+        help=(
+            "按拍摄日期修正完整日期型文件名 YYYY-MM-DD(编号)；保留编号和扩展名"
+        ),
+    )
+    parser.add_argument(
         "--no-fallback-scan", action="store_true", help="没有标准年份目录时不扫描全部媒体"
     )
     parser.add_argument("--include-hidden", action="store_true", help="包括隐藏文件和目录")
     parser.add_argument("--no-report", action="store_true", help="不生成结构化运行报告")
+    parser.add_argument(
+        "--no-hash-cache", action="store_true", help="不复用未变化文件的 SHA-256 扫描缓存"
+    )
+    parser.add_argument(
+        "--recognize-live-photos",
+        action="store_true",
+        help=("按内容识别同目录静态图与动态片段（含误命名为 .mp3 的视频）；真 MP3 不纳入整理"),
+    )
+    parser.add_argument(
+        "--live-photo-target",
+        choices=[value.value for value in LivePhotoTarget],
+        default=None,
+        help=(
+            "后续导入方式；指定此项会自动启用实况识别。两项均输出 Apple 原始双文件，"
+            "coloros16 需经 O+ 互联"
+        ),
+    )
     parser.add_argument("--all-photos-folder", default="ALL_PHOTOS", help="总照片目录名")
     parser.add_argument("--unknown-folder", default="date-unknown", help="未知日期目录名")
     parser.add_argument("--workers", type=int, default=4, help="预留并发数（1—32）")
@@ -116,7 +141,18 @@ def _add_fix_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-aggressive-json", action="store_true")
     parser.add_argument("--use-mtime", action="store_true")
     parser.add_argument("--include-hidden", action="store_true")
-    parser.add_argument("--dry-run", action="store_true", help="只统计可修复文件，不改时间")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只统计可修复时间和文件名，不写入任何改动",
+    )
+    parser.add_argument(
+        "--correct-date-filenames",
+        action="store_true",
+        help=(
+            "按拍摄日期修正完整日期型文件名 YYYY-MM-DD(编号)；保留编号和扩展名"
+        ),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -144,6 +180,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_organize(args: argparse.Namespace) -> int:
+    recognize_live_photos, live_photo_target, target_auto_enabled = _resolve_live_photo_cli_options(
+        args
+    )
     options = OrganizeOptions(
         input_dir=args.input,
         output_dir=args.output,
@@ -159,14 +198,23 @@ def _run_organize(args: argparse.Namespace) -> int:
         aggressive_json=not args.no_aggressive_json,
         use_file_mtime=args.use_mtime,
         set_file_mtime=not args.no_set_mtime,
+        correct_date_filenames=bool(getattr(args, "correct_date_filenames", False)),
         scan_all_if_no_takeout=not args.no_fallback_scan,
         include_hidden=args.include_hidden,
         write_report=not args.no_report,
+        use_hash_cache=not args.no_hash_cache,
+        recognize_live_photos=recognize_live_photos,
+        live_photo_target=live_photo_target,
         all_photos_folder=args.all_photos_folder,
         unknown_date_folder=args.unknown_folder,
         workers=args.workers,
     )
     reporter = ConsoleReporter()
+    if target_auto_enabled:
+        reporter.log(
+            "INFO",
+            "已因指定后续导入方式自动启用实况照片识别；输出仍为 Apple 原始双文件。",
+        )
     context = TaskContext(progress_callback=reporter.progress, log_callback=reporter.log)
     engine = TakeoutEngine()
     try:
@@ -194,6 +242,18 @@ def _run_organize(args: argparse.Namespace) -> int:
         return 1
 
 
+def _resolve_live_photo_cli_options(
+    args: argparse.Namespace,
+) -> tuple[bool, LivePhotoTarget, bool]:
+    """解析可独立指定的平台参数，并标记是否需要说明自动启用。"""
+
+    raw_target = getattr(args, "live_photo_target", None)
+    explicit_target = raw_target is not None
+    target = LivePhotoTarget(raw_target or LivePhotoTarget.APPLE.value)
+    explicitly_enabled = bool(getattr(args, "recognize_live_photos", False))
+    return explicitly_enabled or explicit_target, target, explicit_target and not explicitly_enabled
+
+
 def _run_fix(args: argparse.Namespace) -> int:
     options = FixDateOptions(
         input_dir=args.path,
@@ -205,13 +265,20 @@ def _run_fix(args: argparse.Namespace) -> int:
         use_file_mtime=args.use_mtime,
         dry_run=args.dry_run,
         include_hidden=args.include_hidden,
+        correct_date_filenames=bool(getattr(args, "correct_date_filenames", False)),
     )
     reporter = ConsoleReporter()
     context = TaskContext(progress_callback=reporter.progress, log_callback=reporter.log)
     try:
         result = TakeoutEngine().fix_dates(options, context)
+        rename_count = (
+            int(getattr(result, "rename_candidates", 0))
+            if args.dry_run
+            else int(getattr(result, "renamed", 0))
+        )
         print(
             f"扫描 {result.total} 个媒体；可修复/已修复 {result.updated}；"
+            f"{'预计可重命名' if args.dry_run else '已重命名'} {rename_count}；"
             f"无可用日期 {result.unchanged}；失败 {result.failed}"
         )
         return 1 if result.failed else 0
@@ -238,6 +305,17 @@ def _run_legacy(argv: list[str]) -> int:
     parser.add_argument("--skip-extras", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--guess-from-name", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--copy", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--recognize-live-photos",
+        action="store_true",
+        help="识别并成组整理 Apple 实况照片",
+    )
+    parser.add_argument(
+        "--live-photo-target",
+        choices=[value.value for value in LivePhotoTarget],
+        default=None,
+        help="后续导入方式；指定后自动启用实况识别",
+    )
     parser.add_argument("--interactive", action="store_true")
     args = parser.parse_args(argv)
     if args.interactive:
@@ -253,6 +331,7 @@ def _run_legacy(argv: list[str]) -> int:
             use_mtime=False,
             include_hidden=False,
             dry_run=False,
+            correct_date_filenames=False,
         )
         return _run_fix(fix_args)
     if not args.input or not args.output:
@@ -272,9 +351,13 @@ def _run_legacy(argv: list[str]) -> int:
         no_aggressive_json=False,
         use_mtime=False,
         no_set_mtime=False,
+        correct_date_filenames=False,
         no_fallback_scan=True,
         include_hidden=False,
         no_report=False,
+        no_hash_cache=False,
+        recognize_live_photos=args.recognize_live_photos,
+        live_photo_target=args.live_photo_target,
         all_photos_folder="ALL_PHOTOS",
         unknown_folder="date-unknown",
         workers=4,
@@ -291,6 +374,8 @@ def _write_plan(path: Path, actions) -> None:
             "source": str(action.source) if action.source else None,
             "target": str(action.target) if action.target else None,
             "album": action.album,
+            "bundle_id": action.bundle_id,
+            "live_photo_role": (action.live_photo_role.value if action.live_photo_role else None),
             "reason": action.reason,
         }
         for action in actions
@@ -301,10 +386,37 @@ def _write_plan(path: Path, actions) -> None:
 
 def _print_preview(analysis, actions) -> None:
     stats = analysis.statistics
+    cache_text = (
+        f"，缓存命中 {stats.hash_cache_hits} / 需计算 {stats.hash_cache_misses}"
+        if analysis.options.use_hash_cache
+        else "，指纹缓存已关闭"
+    )
+    live_photo_text = _format_live_photo_preview(stats, analysis.options.recognize_live_photos)
     print(
-        f"预览完成：发现 {stats.discovered}，去重 {stats.duplicates_removed}，"
+        f"预览完成：发现 {stats.discovered}，重复组 {stats.duplicate_groups}，"
+        f"同来源跳过 {stats.duplicates_removed}，"
         f"编辑副本 {stats.extras_removed}，唯一媒体 {len(analysis.media)}，"
         f"日期未知 {stats.unknown_dates}，计划操作 {len(actions)}"
+        f"{cache_text}{live_photo_text}"
+    )
+
+
+def _format_live_photo_preview(stats, enabled: bool) -> str:
+    """为终端摘要展示完整配对、扩展名恢复和歧义候选数量。"""
+
+    if not enabled:
+        return "，实况照片识别已关闭"
+    pairs = max(int(stats.live_photo_pairs), 0)
+    verified = min(max(int(stats.live_photo_metadata_verified), 0), pairs)
+    incomplete = max(pairs - verified, 0)
+    repaired = max(int(stats.live_photo_repaired_extensions), 0)
+    ambiguous = max(int(stats.live_photo_ambiguous), 0)
+    rejected = max(int(getattr(stats, "live_photo_rejected", 0)), 0)
+    warning = "，需检查" if incomplete or ambiguous or rejected else ""
+    return (
+        f"，实况照片 {pairs} 组（Apple 元数据完整 {verified}/{pairs}，"
+        f"不完整 {incomplete}，后缀恢复 {repaired}，歧义 {ambiguous}，"
+        f"标识冲突拒绝 {rejected}{warning}）"
     )
 
 
