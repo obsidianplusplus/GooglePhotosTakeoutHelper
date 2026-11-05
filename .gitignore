@@ -1,27 +1,39 @@
+# 依赖与构建产物
+node_modules/
+coverage/
+dist/
+dist-node/
+*.tsbuildinfo
+
+# 日志
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# 本地开发 / 验收临时产物
+shots/
+.fixtures/
+*.gpth-part
+*.gpth-backup
+*.gpth-move-hold
+.gpth-task.lock
+
+# 本地运行时可能生成的输出目录
+ALL_PHOTOS/
+photos/
+output/
+
+# 环境变量与本地配置
+.env
+.env.*
+!.env.example
+
+# 编辑器 / 操作系统
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
 
-# Python 构建输出
-build/
-
-photos/
-
-ALL_PHOTOS/
-output/
-*.log
-
-# Python 虚拟环境、缓存、测试与打包产物
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-.venv/
-*.egg-info/
-dist/
-*.spec
-
-# 任务中断时可能留下的临时安全复制文件
-*.gpth-part
+# 若使用 npm 安装，避免与 pnpm-lock.yaml 混用锁文件
+package-lock.json

@@ -1,0 +1,58 @@
+{
+  "name": "google-photos-takeout-helper",
+  "version": "5.0.0",
+  "description": "整理 Google Photos Takeout 照片、视频、日期与相册的 Node.js 工具，附带 Liquid Glass Web 界面（PhotoTakeout Studio）",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Google Photos Takeout Helper contributors",
+  "homepage": "https://github.com/obsidianplusplus/GooglePhotosTakeoutHelper",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/obsidianplusplus/GooglePhotosTakeoutHelper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/obsidianplusplus/GooglePhotosTakeoutHelper/issues"
+  },
+  "keywords": [
+    "google-photos",
+    "takeout",
+    "photo",
+    "metadata",
+    "album",
+    "live-photo",
+    "liquid-glass",
+    "nodejs"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "bin": {
+    "gpth": "src/cli.js"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/cli.js web",
+    "web": "node src/cli.js web",
+    "gpth": "node src/cli.js",
+    "organize": "node src/cli.js organize",
+    "fix": "node src/cli.js fix",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "heic-decode": "^2.1.0",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.16.0"
+  }
+}

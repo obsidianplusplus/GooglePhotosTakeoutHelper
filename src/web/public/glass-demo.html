@@ -1,0 +1,2194 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eef1f9">
+  <meta name="color-scheme" content="light dark">
+  <title>PhotoTakeout Studio · Liquid Glass 设计系统</title>
+  <link rel="stylesheet" href="styles/glass.css">
+  <script>
+    /* 首屏主题引导：避免深色模式闪白（?theme=dark 优先，其次 localStorage） */
+    (function () {
+      try {
+        var q = new URLSearchParams(location.search).get("theme");
+        var stored = localStorage.getItem("glass-theme");
+        var theme = (q === "light" || q === "dark") ? q : stored;
+        if (theme === "light" || theme === "dark") document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) { /* noop */ }
+    })();
+  </script>
+  <style>
+    /* ===== 仅供 demo 页使用的舞台样式，设计系统本体全部在 glass.css ===== */
+    body.demo-page { overflow: auto; }
+
+    .demo-app { height: 100dvh; }
+
+    /* 侧栏 / 主区细节 */
+    .demo-search { width: 218px; }
+    .demo-search .g-input { height: 32px; font-size: 12px; }
+    .demo-search .g-search__kbd { right: 7px; }
+
+    .glass-main__body { gap: 12px; }
+
+    /* 概览统计 */
+    .demo-stats { flex: none; }
+
+    /* 设置卡片 */
+    .demo-setup {
+      flex: none;
+      padding: 13px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .demo-card__head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 22px;
+    }
+
+    .demo-card__title {
+      font-size: 13px;
+      font-weight: 690;
+      letter-spacing: -0.012em;
+    }
+
+    .demo-setup__grid {
+      display: grid;
+      grid-template-columns: 1.16fr 0.92fr 0.92fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .demo-paths { display: flex; flex-direction: column; gap: 8px; }
+    .demo-options { display: flex; flex-direction: column; gap: 8px; }
+    .demo-options .g-switch { height: 26px; }
+    .demo-options .g-switch__label { font-size: 12px; }
+    .demo-options .g-segmented { width: 100%; }
+    .demo-options .g-select { height: 32px; font-size: 12px; }
+    .demo-paths .g-input { height: 32px; }
+    .demo-paths .g-field__label { font-size: 11px; }
+    .demo-paths .g-field { gap: 4px; }
+
+    /* 预览表格卡 */
+    .demo-preview {
+      flex: 1 1 auto;
+      min-height: 250px;
+      padding: 12px 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .demo-preview .g-table-wrap { flex: 1 1 auto; min-height: 0; }
+    .demo-preview .g-scroll { flex: 1 1 auto; min-height: 0; height: 100%; }
+
+    .demo-preview__chips { margin-left: 2px; }
+
+    /* 底部固定操作条 */
+    .demo-actionbar-wrap { flex: none; padding: 0 18px 16px; }
+    .demo-actionbar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 14px;
+      border-radius: var(--r-lg);
+      background: var(--glass-bg-strong);
+    }
+    .demo-actionbar__status {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+    }
+    .demo-actionbar__row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .demo-actionbar__text {
+      font-size: 12px;
+      font-weight: 560;
+      color: var(--text-2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .demo-actionbar__text b { color: var(--text); font-weight: 700; }
+    .demo-actionbar__progress { display: flex; align-items: center; gap: 10px; max-width: 430px; }
+    .demo-actionbar__progress .g-progress { flex: 1; }
+    .demo-actionbar__buttons { display: flex; align-items: center; gap: 8px; flex: none; }
+
+    /* =============================== 组件库 =============================== */
+    .demo-gallery {
+      position: relative;
+      z-index: 1;
+      max-width: 1460px;
+      margin: 0 auto;
+      padding: 26px 22px 100px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .demo-gallery-only .demo-app { display: none; }
+    .demo-gallery-only .demo-gallery { padding-top: 26px; }
+
+    .demo-hero { padding: 26px 28px; }
+
+    .demo-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 9px;
+      font-size: 10.5px;
+      font-weight: 680;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .demo-kicker .g-dot { width: 6px; height: 6px; }
+
+    .demo-h2 {
+      font-size: 34px;
+      font-weight: 780;
+      letter-spacing: -0.035em;
+      line-height: 1.14;
+    }
+
+    .demo-lead {
+      max-width: 720px;
+      margin-top: 7px;
+      font-size: 13.5px;
+      line-height: 1.65;
+      color: var(--text-3);
+    }
+
+    .demo-sections {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+
+    .demo-section {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 17px 17px 19px;
+      border-radius: var(--r-xl);
+    }
+
+    .demo-section--wide { grid-column: 1 / -1; }
+
+    .demo-section__head { display: flex; align-items: flex-start; gap: 10px; }
+    .demo-section__title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 720;
+      letter-spacing: -0.018em;
+    }
+    .demo-section__title .g-icon { color: var(--accent); }
+    .demo-section__desc {
+      margin-top: 3px;
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: var(--text-3);
+    }
+
+    .demo-label {
+      font-size: 10px;
+      font-weight: 680;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+
+    .demo-swatch {
+      display: grid;
+      grid-template-columns: 78px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+    }
+
+    .demo-swatch-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+      gap: 18px 30px;
+      align-items: start;
+    }
+
+    .demo-swatch-grid .demo-swatch {
+      grid-template-columns: 64px minmax(0, 1fr);
+    }
+
+    .demo-swatch-grid .demo-block {
+      gap: 16px;
+    }
+
+    .demo-overlay-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .demo-overlay-grid .demo-block {
+      gap: 12px;
+    }
+
+    .demo-swatch > .demo-label { padding-top: 2px; }
+
+    .demo-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .demo-wrap--end { justify-content: flex-end; }
+    .demo-block { display: flex; flex-direction: column; gap: 10px; }
+    .demo-divider { height: 1px; background: var(--hairline); }
+    .demo-inline-note { font-size: 11px; color: var(--text-3); }
+
+    .demo-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+    .demo-slider-row { display: flex; align-items: center; gap: 12px; }
+    .demo-slider-row .g-slider { flex: 1; }
+    .demo-slider-value {
+      min-width: 44px;
+      text-align: right;
+      font-size: 12px;
+      font-weight: 680;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+
+    .demo-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+    .demo-progress-list { display: flex; flex-direction: column; gap: 13px; }
+    .demo-progress-item { display: flex; flex-direction: column; gap: 6px; }
+    .demo-progress-item__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 11.5px;
+      color: var(--text-3);
+    }
+    .demo-progress-item__head b { color: var(--text-2); font-weight: 620; }
+
+    .demo-ring-row { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+
+    .demo-thumb-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+
+    .demo-theme-hint {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    .demo-log-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .demo-modal-demo { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .demo-kbd-row { display: flex; align-items: center; gap: 6px; }
+    .demo-kbd-row .demo-inline-note { margin-left: 2px; }
+
+    .demo-sheet-demo {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 14px;
+      border-radius: var(--r-lg);
+      background: var(--glass-bg-subtle);
+      border: 1px solid var(--glass-border);
+    }
+
+    .demo-material-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+    .demo-material {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 16px;
+      border-radius: var(--r-lg);
+      min-height: 108px;
+      justify-content: flex-end;
+    }
+
+    .demo-material__name { font-size: 12.5px; font-weight: 680; }
+    .demo-material__desc { font-size: 11px; line-height: 1.5; color: var(--text-3); }
+
+    /* 目录选择器 */
+    .demo-picker { display: flex; flex-direction: column; gap: 13px; }
+    .demo-picker__crumbs { gap: 4px; }
+    .demo-picker__crumbs .g-icon { width: 13px; height: 13px; color: var(--text-3); }
+    .demo-picker__crumbs .g-chip { height: 26px; padding: 0 10px; font-size: 11px; }
+    .demo-picker .g-search .g-input { height: 34px; }
+    .demo-picker .g-list { border-radius: var(--r-md); }
+
+    /* 重复项对比 */
+    .demo-compare__path {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      overflow-wrap: anywhere;
+      color: var(--text-2);
+    }
+
+    /* 缩略图内的 svg 作品 */
+    .g-thumb > svg { width: 100%; height: 100%; display: block; }
+
+    .demo-art-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+    /* 响应式 */
+    @media (max-width: 1280px) {
+      .demo-setup__grid { grid-template-columns: 1.1fr 0.95fr 0.95fr; gap: 14px; }
+      .demo-search { width: 168px; }
+      .demo-swatch { grid-template-columns: 70px minmax(0, 1fr); }
+    }
+
+    @media (max-width: 1120px) {
+      .demo-sections { grid-template-columns: minmax(0, 1fr); }
+      .demo-section--wide { grid-column: auto; }
+      .demo-setup__grid { grid-template-columns: 1fr 1fr; }
+      .demo-setup__grid > :first-child { grid-column: 1 / -1; }
+      .demo-search { display: none; }
+      .demo-material-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 900px) {
+      .demo-app { height: auto; min-height: 0; }
+      .demo-actionbar { flex-wrap: wrap; }
+      .demo-actionbar__buttons { width: 100%; justify-content: flex-end; }
+      .demo-form-grid { grid-template-columns: 1fr; }
+      .demo-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .demo-thumb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      .demo-gallery { padding: 16px 12px 70px; }
+      .demo-setup__grid { grid-template-columns: 1fr; }
+      .demo-swatch { grid-template-columns: 1fr; gap: 6px; }
+      .demo-stat-grid { grid-template-columns: 1fr; }
+      .demo-h2 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body class="demo-page">
+
+  <!--
+    内联图标 sprite：与 assets/icons.svg、js/glass.js 中的图标同源。
+    内联版本让本 demo 即使以 file:// 直接双击打开（ES module 受 CORS 限制）
+    也能正常显示图标；真实页面交由 Glass.init() 自动注入或使用外部 sprite。
+  -->
+  <svg id="glass-sprite" class="g-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="gi-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.25 7.7c0-1.08.87-1.95 1.95-1.95h3.3c.58 0 1.13.26 1.5.71l1.05 1.29h7.75c1.08 0 1.95.87 1.95 1.95v7.6c0 1.08-.87 1.95-1.95 1.95H5.2c-1.08 0-1.95-.87-1.95-1.95z"/></symbol>
+      <symbol id="gi-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.6 3.5H7.1c-.94 0-1.7.76-1.7 1.7v13.6c0 .94.76 1.7 1.7 1.7h9.8c.94 0 1.7-.76 1.7-1.7V8.4z"/><path d="M13.6 3.5v4.9h5"/></symbol>
+      <symbol id="gi-photo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3.2"/><circle cx="15.6" cy="8.9" r="1.35"/><path d="M5 16.4l3.9-3.5c.6-.54 1.52-.5 2.06.1l3.02 3.32 1.42-1.3c.56-.51 1.42-.48 1.95.06l1.65 1.72"/></symbol>
+      <symbol id="gi-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="5.4" width="17.6" height="13.2" rx="3.4"/><path d="M10.4 9.4v5.2l4.4-2.6z"/></symbol>
+      <symbol id="gi-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.72 4.6 4.6 1.72-4.6 1.72L12 15.84l-1.72-4.6-4.6-1.72 4.6-1.72z"/><path d="M18.7 14.9l.68 1.82 1.82.68-1.82.68-.68 1.82-.68-1.82-1.82-.68 1.82-.68z"/><path d="M5.4 15.6l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z"/></symbol>
+      <symbol id="gi-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.3 3.9l3.3 3.3-3.3 3.3"/><path d="M19.6 7.2H7.6a3 3 0 0 0-3 3v1.4"/><path d="M7.7 20.1l-3.3-3.3 3.3-3.3"/><path d="M4.4 16.8h12a3 3 0 0 0 3-3v-1.4"/></symbol>
+      <symbol id="gi-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.6" y="8.6" width="11" height="11" rx="2.8"/><path d="M15.4 8.6V6.2c0-1.5-1.2-2.7-2.7-2.7H6.2c-1.5 0-2.7 1.2-2.7 2.7v6.5c0 1.5 1.2 2.7 2.7 2.7h2.4"/></symbol>
+      <symbol id="gi-move" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v16.8M3.6 12h16.8"/><path d="M9.4 6.2L12 3.6l2.6 2.6M9.4 17.8L12 20.4l2.6-2.6M6.2 9.4L3.6 12l2.6 2.6M17.8 9.4L20.4 12l-2.6 2.6"/></symbol>
+      <symbol id="gi-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.3 5.7v12.6c0 .92 1.01 1.47 1.78.96l9.2-6.3c.7-.48.7-1.49 0-1.97l-9.2-6.3c-.77-.52-1.78.04-1.78.96z"/></symbol>
+      <symbol id="gi-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7.4" y="5" width="3.2" height="14" rx="1.3"/><rect x="13.4" y="5" width="3.2" height="14" rx="1.3"/></symbol>
+      <symbol id="gi-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 6.2l11.6 11.6M17.8 6.2L6.2 17.8"/></symbol>
+      <symbol id="gi-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.6 5.4L8 12l6.6 6.6"/></symbol>
+      <symbol id="gi-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.4 5.4L16 12l-6.6 6.6"/></symbol>
+      <symbol id="gi-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.4L12 15.4l6-6"/></symbol>
+      <symbol id="gi-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 12h14.8M13.5 6.1L19.4 12l-5.9 5.9"/></symbol>
+      <symbol id="gi-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6.2 10.8L12 5l5.8 5.8"/></symbol>
+      <symbol id="gi-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6.2 13.2L12 19l5.8-5.8"/></symbol>
+      <symbol id="gi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 12.7l4.7 4.7L19.6 7"/></symbol>
+      <symbol id="gi-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M8.3 12.3l2.5 2.5 5.1-5.3"/></symbol>
+      <symbol id="gi-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.35 4.3L2.9 17.1c-.6 1.04.15 2.34 1.35 2.34h15.5c1.2 0 1.95-1.3 1.35-2.34L13.65 4.3c-.6-1.04-2.7-1.04-3.3 0z"/><path d="M12 9v4.6"/><path d="M12 17h.01"/></symbol>
+      <symbol id="gi-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M9.1 9.1l5.8 5.8M14.9 9.1l-5.8 5.8"/></symbol>
+      <symbol id="gi-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 11.2v5"/><path d="M12 8h.01"/></symbol>
+      <symbol id="gi-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.1 12c0-.42-.05-.83-.13-1.22l2-1.55-2-3.46-2.36.95c-.6-.5-1.3-.9-2.06-1.15L14.2 3h-4.4l-.35 2.57c-.76.25-1.46.65-2.06 1.15l-2.36-.95-2 3.46 2 1.55c-.08.39-.13.8-.13 1.22s.05.83.13 1.22l-2 1.55 2 3.46 2.36-.95c.6.5 1.3.9 2.06 1.15L9.8 21h4.4l.35-2.57c.76-.25 1.46-.65 2.06-1.15l2.36.95 2-3.46-2-1.55c.08-.39.13-.8.13-1.22z"/><circle cx="12" cy="12" r="3.1"/></symbol>
+      <symbol id="gi-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.6 6.6h11M8.6 12h11M8.6 17.4h11"/><path d="M4.7 6.6h.01M4.7 12h.01M4.7 17.4h.01"/></symbol>
+      <symbol id="gi-wand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 19.6l9-9"/><path d="M15.2 3.5l.85 2.25L18.3 6.6l-2.25.85-.85 2.25-.85-2.25-2.25-.85 2.25-.85z"/><path d="M18.5 13.6l.55 1.45 1.45.55-1.45.55-.55 1.45-.55-1.45-1.45-.55 1.45-.55z"/></symbol>
+      <symbol id="gi-external-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 4.5h5.3v5.3"/><path d="M19.5 4.5L11 13"/><path d="M18.4 14v3.6c0 1.05-.85 1.9-1.9 1.9H5.9c-1.05 0-1.9-.85-1.9-1.9V7.1c0-1.05.85-1.9 1.9-1.9h3.9"/></symbol>
+      <symbol id="gi-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 12a7.2 7.2 0 0 1 12.3-5.1l2.5 2.5"/><path d="M19.6 4.6v4.8h-4.8"/><path d="M19.2 12a7.2 7.2 0 0 1-12.3 5.1l-2.5-2.5"/><path d="M4.4 19.4v-4.8h4.8"/></symbol>
+      <symbol id="gi-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 7h14.8M9.6 7V5.5c0-.8.65-1.45 1.45-1.45h1.9c.8 0 1.45.65 1.45 1.45V7"/><path d="M6.5 7l.85 11.5c.06.8.72 1.4 1.52 1.4h6.26c.8 0 1.46-.6 1.52-1.4L17.5 7"/><path d="M10.2 11v4.6M13.8 11v4.6"/></symbol>
+      <symbol id="gi-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.3"/><path d="M15.6 15.6L20 20"/></symbol>
+      <symbol id="gi-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 13.7a3.9 3.9 0 0 0 5.52 0l2.6-2.6a3.9 3.9 0 1 0-5.52-5.52l-1.3 1.3"/><path d="M13.7 10.3a3.9 3.9 0 0 0-5.52 0l-2.6 2.6a3.9 3.9 0 1 0 5.52 5.52l1.3-1.3"/></symbol>
+      <symbol id="gi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.9 12S6.5 5.9 12 5.9 21.1 12 21.1 12 17.5 18.1 12 18.1 2.9 12 2.9 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="gi-bookmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 4.6h10.8c.5 0 .9.4.9.9v14.9L12 16.2l-6.3 4.2V5.5c0-.5.4-.9.9-.9z"/></symbol>
+      <symbol id="gi-timeline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.8 12h16.4"/><circle cx="7.6" cy="12" r="2.2"/><circle cx="16.4" cy="12" r="2.2"/><path d="M7.6 9.8V5.5M16.4 18.5v-4.3"/></symbol>
+      <symbol id="gi-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.35 5.35l1.55 1.55M17.1 17.1l1.55 1.55M18.65 5.35L17.1 6.9M6.9 17.1l-1.55 1.55"/></symbol>
+      <symbol id="gi-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.4A8.5 8.5 0 0 1 9.6 4a8.5 8.5 0 1 0 10.4 10.4z"/></symbol>
+      <symbol id="gi-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.4" width="18" height="12.6" rx="2.6"/><path d="M9.5 20.5h5M12 17v3.5"/></symbol>
+      <symbol id="gi-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l7.2 2.8v5.6c0 4.3-3 7.5-7.2 9.3-4.2-1.8-7.2-5-7.2-9.3V6z"/><path d="M9 12l2.2 2.2 4.2-4.4"/></symbol>
+      <symbol id="gi-hard-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.8 13.6h16.4"/><path d="M7 17h.01M10 17h.01"/></symbol>
+      <symbol id="gi-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8h7.5M17 8h2.5M4.5 16h2.5M12 16h7.5"/><circle cx="14.5" cy="8" r="2.2"/><circle cx="9.5" cy="16" r="2.2"/></symbol>
+      <symbol id="gi-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="gi-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></symbol>
+      <symbol id="gi-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 12h.01M12 12h.01M18.4 12h.01" stroke-width="2.6"/></symbol>
+      <symbol id="gi-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.8 9V6.4c0-1.43 1.17-2.6 2.6-2.6H9M15 3.8h2.6c1.43 0 2.6 1.17 2.6 2.6V9M20.2 15v2.6c0 1.43-1.17 2.6-2.6 2.6H15M9 20.2H6.4c-1.43 0-2.6-1.17-2.6-2.6V15"/><path d="M3.8 12h16.4"/></symbol>
+      <symbol id="gi-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l8.4 4.6L12 12.7 3.6 8.1z"/><path d="M3.6 12.2l8.4 4.6 8.4-4.6"/><path d="M3.6 16.3l8.4 4.6 8.4-4.6"/></symbol>
+      <symbol id="gi-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.8 9.6h16.4M8 3.2v3.6M16 3.2v3.6"/></symbol>
+      <symbol id="gi-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3 1.9"/></symbol>
+      <symbol id="gi-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5V4.6M7.5 9.1L12 4.6l4.5 4.5"/><path d="M4.5 14.6v2.9c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2v-2.9"/></symbol>
+      <symbol id="gi-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6v10.9M7.5 11L12 15.5l4.5-4.5"/><path d="M4.5 14.6v2.9c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2v-2.9"/></symbol>
+      <symbol id="gi-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.2h16l-6.2 7.3v5.2l-3.6 1.9v-7.1z"/></symbol>
+      <symbol id="gi-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.8" y="3.8" width="7" height="7" rx="2"/><rect x="13.2" y="3.8" width="7" height="7" rx="2"/><rect x="3.8" y="13.2" width="7" height="7" rx="2"/><rect x="13.2" y="13.2" width="7" height="7" rx="2"/></symbol>
+      <symbol id="gi-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.6l8-6.4 8 6.4v8.3c0 .9-.73 1.6-1.6 1.6H5.6c-.87 0-1.6-.7-1.6-1.6z"/><path d="M9.6 20.5v-6.2h4.8v6.2"/></symbol>
+      <symbol id="gi-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.2" width="17" height="4.6" rx="1.8"/><path d="M5.2 8.8v9.4c0 1.1.9 2 2 2h9.6c1.1 0 2-.9 2-2V8.8"/><path d="M10 12.6h4"/></symbol>
+      <symbol id="gi-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.8" y="10.2" width="14.4" height="10.2" rx="3"/><path d="M8.2 10.2V7.6a3.8 3.8 0 0 1 7.6 0v2.6"/><path d="M12 14.4v2.2"/></symbol>
+      <symbol id="gi-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.2 2.8L5.2 13.4h5.4l-.8 7.8 8-10.6h-5.4z"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- 动态极光背景 -->
+  <div class="glass-bg" aria-hidden="true">
+    <div class="glass-bg__orb glass-bg__orb--1"></div>
+    <div class="glass-bg__orb glass-bg__orb--2"></div>
+    <div class="glass-bg__orb glass-bg__orb--3"></div>
+    <div class="glass-bg__orb glass-bg__orb--4"></div>
+    <div class="glass-bg__orb glass-bg__orb--5"></div>
+    <div class="glass-bg__beam"></div>
+  </div>
+
+  <!-- 无外部资源的示例照片（内联 SVG） -->
+  <svg class="demo-art-defs" aria-hidden="true">
+    <defs>
+      <linearGradient id="artSky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#7d97ff"/>
+        <stop offset=".38" stop-color="#b9a6ff"/>
+        <stop offset=".62" stop-color="#ffb4c6"/>
+        <stop offset="1" stop-color="#ffd79c"/>
+      </linearGradient>
+      <linearGradient id="artWater" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#3c4f8f"/>
+        <stop offset=".55" stop-color="#222f5e"/>
+        <stop offset="1" stop-color="#101832"/>
+      </linearGradient>
+      <linearGradient id="artMountain" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#6a6fae"/>
+        <stop offset="1" stop-color="#3a3f74"/>
+      </linearGradient>
+      <linearGradient id="forestSky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#9fe6df"/>
+        <stop offset=".5" stop-color="#d7f6e9"/>
+        <stop offset="1" stop-color="#f4fbf1"/>
+      </linearGradient>
+      <linearGradient id="citySky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#101638"/>
+        <stop offset=".5" stop-color="#39275f"/>
+        <stop offset="1" stop-color="#a7507a"/>
+      </linearGradient>
+      <linearGradient id="flowerBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#26361f"/>
+        <stop offset=".5" stop-color="#4c6b33"/>
+        <stop offset="1" stop-color="#8aa35b"/>
+      </linearGradient>
+      <radialGradient id="sunGlow" cx=".5" cy=".5" r=".5">
+        <stop offset="0" stop-color="#fff6d8" stop-opacity=".95"/>
+        <stop offset="1" stop-color="#fff6d8" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="flowerPetal" cx=".35" cy=".3" r=".8">
+        <stop offset="0" stop-color="#ffd8e6"/>
+        <stop offset=".55" stop-color="#ff9dc2"/>
+        <stop offset="1" stop-color="#e2578f"/>
+      </radialGradient>
+    </defs>
+
+    <symbol id="art-lake" viewBox="0 0 640 480">
+      <rect width="640" height="480" fill="url(#artSky)"/>
+      <circle cx="468" cy="146" r="120" fill="url(#sunGlow)"/>
+      <circle cx="468" cy="146" r="46" fill="#fff4d3"/>
+      <path d="M0 272 L124 186 L206 240 L292 158 L398 252 L486 198 L640 290 L640 480 L0 480Z" fill="url(#artMountain)"/>
+      <path d="M0 310 L96 262 L214 310 L330 252 L472 320 L640 272 L640 480 L0 480Z" fill="#2b3463" opacity=".92"/>
+      <rect y="332" width="640" height="148" fill="url(#artWater)"/>
+      <path d="M0 350h640M0 374h640M0 402h640M0 436h640" stroke="#ffd9a8" stroke-opacity=".16" stroke-width="5"/>
+      <path d="M300 388c18-8 36-8 54 0M348 412c14-6 28-6 42 0" stroke="#ffd9a8" stroke-opacity=".3" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M192 118c8-7 18-7 26 0M236 138c6-5 14-5 20 0M560 96c6-5 14-5 20 0" stroke="#4a3a5c" stroke-opacity=".55" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+      <rect x="0" y="0" width="640" height="480" fill="url(#artSky)" opacity=".08"/>
+    </symbol>
+
+    <symbol id="art-forest" viewBox="0 0 640 480">
+      <rect width="640" height="480" fill="url(#forestSky)"/>
+      <circle cx="150" cy="120" r="90" fill="#fffef0" opacity=".5"/>
+      <path d="M0 300 L120 214 L226 286 L352 196 L470 282 L560 230 L640 296 L640 480 L0 480Z" fill="#8fbcae" opacity=".65"/>
+      <path d="M0 344 L132 272 L268 340 L402 262 L540 344 L640 300 L640 480 L0 480Z" fill="#5b8f82" opacity=".8"/>
+      <path d="M0 400 L148 336 L306 404 L452 340 L580 404 L640 372 L640 480 L0 480Z" fill="#33645c"/>
+      <g fill="#22473f">
+        <path d="M96 480 L136 340 L176 480Z"/><path d="M150 480 L188 356 L226 480Z"/>
+        <path d="M420 480 L462 330 L504 480Z"/><path d="M470 480 L506 360 L542 480Z"/>
+        <path d="M556 480 L590 356 L624 480Z"/>
+      </g>
+      <g stroke="#eafff7" stroke-opacity=".28" stroke-width="3" fill="none" stroke-linecap="round">
+        <path d="M0 236h640M0 260h640"/>
+      </g>
+    </symbol>
+
+    <symbol id="art-city" viewBox="0 0 640 480">
+      <rect width="640" height="480" fill="url(#citySky)"/>
+      <circle cx="500" cy="112" r="52" fill="#ffe9c8" opacity=".92"/>
+      <circle cx="500" cy="112" r="96" fill="url(#sunGlow)" opacity=".35"/>
+      <g fill="#151b3c">
+        <rect x="20" y="250" width="86" height="230" rx="5"/>
+        <rect x="118" y="196" width="70" height="284" rx="5"/>
+        <rect x="200" y="284" width="92" height="196" rx="5"/>
+        <rect x="304" y="168" width="76" height="312" rx="5"/>
+        <rect x="392" y="242" width="112" height="238" rx="5"/>
+        <rect x="516" y="212" width="64" height="268" rx="5"/>
+        <rect x="588" y="286" width="52" height="194" rx="5"/>
+      </g>
+      <g fill="#ffd98a" opacity=".75">
+        <rect x="36" y="268" width="9" height="12" rx="2"/><rect x="58" y="268" width="9" height="12" rx="2"/>
+        <rect x="80" y="292" width="9" height="12" rx="2"/><rect x="36" y="316" width="9" height="12" rx="2"/>
+        <rect x="134" y="216" width="9" height="12" rx="2"/><rect x="158" y="240" width="9" height="12" rx="2"/>
+        <rect x="134" y="288" width="9" height="12" rx="2"/><rect x="320" y="192" width="9" height="12" rx="2"/>
+        <rect x="346" y="216" width="9" height="12" rx="2"/><rect x="320" y="264" width="9" height="12" rx="2"/>
+        <rect x="408" y="262" width="9" height="12" rx="2"/><rect x="432" y="286" width="9" height="12" rx="2"/>
+        <rect x="456" y="262" width="9" height="12" rx="2"/><rect x="532" y="232" width="9" height="12" rx="2"/>
+        <rect x="554" y="256" width="9" height="12" rx="2"/><rect x="604" y="306" width="9" height="12" rx="2"/>
+        <rect x="220" y="304" width="9" height="12" rx="2"/><rect x="244" y="328" width="9" height="12" rx="2"/>
+      </g>
+      <rect x="0" y="432" width="640" height="48" fill="#0a0e22"/>
+      <g stroke="#ffcf8a" stroke-opacity=".22" stroke-width="3">
+        <path d="M60 432l-24 48M180 432l-20 48M330 432l-26 48M470 432l-22 48M580 432l-18 48"/>
+      </g>
+    </symbol>
+
+    <symbol id="art-flower" viewBox="0 0 640 480">
+      <rect width="640" height="480" fill="url(#flowerBg)"/>
+      <g fill="#bcd68a" opacity=".22">
+        <circle cx="110" cy="96" r="46"/><circle cx="220" cy="60" r="34"/><circle cx="560" cy="120" r="56"/>
+        <circle cx="500" cy="50" r="30"/><circle cx="86" cy="330" r="52"/><circle cx="600" cy="360" r="44"/>
+      </g>
+      <g transform="translate(320 246)">
+        <g fill="#ff9dc2" opacity=".55">
+          <ellipse cx="0" cy="-104" rx="52" ry="88"/>
+          <ellipse cx="0" cy="104" rx="52" ry="88"/>
+          <ellipse cx="-104" cy="0" rx="88" ry="52"/>
+          <ellipse cx="104" cy="0" rx="88" ry="52"/>
+          <ellipse cx="74" cy="-74" rx="52" ry="78" transform="rotate(45 74 -74)"/>
+          <ellipse cx="-74" cy="74" rx="52" ry="78" transform="rotate(45 -74 74)"/>
+        </g>
+        <g fill="url(#flowerPetal)">
+          <ellipse cx="0" cy="-92" rx="42" ry="74"/>
+          <ellipse cx="0" cy="92" rx="42" ry="74"/>
+          <ellipse cx="-92" cy="0" rx="74" ry="42"/>
+          <ellipse cx="92" cy="0" rx="74" ry="42"/>
+          <ellipse cx="66" cy="-66" rx="42" ry="70" transform="rotate(45 66 -66)"/>
+          <ellipse cx="-66" cy="66" rx="42" ry="70" transform="rotate(45 -66 66)"/>
+        </g>
+        <circle cx="0" cy="0" r="40" fill="#ffe9a3"/>
+        <circle cx="0" cy="0" r="26" fill="#f6c95f"/>
+      </g>
+    </symbol>
+  </svg>
+
+  <!-- ====================== 应用外壳：整理 Takeout ====================== -->
+  <div class="glass-app demo-app" data-glass-app>
+
+    <!-- 侧栏 -->
+    <aside class="glass-sidebar">
+      <div class="glass-sidebar__brand">
+        <div class="glass-sidebar__avatar" aria-hidden="true">PT</div>
+        <div class="glass-sidebar__brand-text">
+          <div class="glass-sidebar__brand-name">PhotoTakeout<br>Studio</div>
+          <div class="glass-sidebar__brand-sub">安全整理 · 本地处理</div>
+        </div>
+      </div>
+
+      <nav class="glass-nav" aria-label="主导航">
+        <div class="glass-nav__label">工作区</div>
+
+        <a class="glass-nav-item is-active" href="#" aria-current="page">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg>
+          <span class="glass-nav-item__label">整理 Takeout</span>
+          <span class="glass-nav-item__badge">整理</span>
+        </a>
+
+        <a class="glass-nav-item" href="#">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-calendar"></use></svg>
+          <span class="glass-nav-item__label">修复文件日期</span>
+        </a>
+
+        <a class="glass-nav-item" href="#">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-list"></use></svg>
+          <span class="glass-nav-item__label">运行日志</span>
+          <span class="glass-nav-item__badge">1.2k</span>
+        </a>
+
+        <a class="glass-nav-item" href="#">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-gear"></use></svg>
+          <span class="glass-nav-item__label">设置与关于</span>
+        </a>
+
+        <div class="glass-nav__label">工具</div>
+
+        <button class="glass-nav-item" type="button" data-modal-open="#compare-modal">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-copy"></use></svg>
+          <span class="glass-nav-item__label">重复项对比</span>
+          <span class="glass-nav-item__badge">214</span>
+        </button>
+
+        <a class="glass-nav-item" href="#gallery">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-sparkles"></use></svg>
+          <span class="glass-nav-item__label">组件库预览</span>
+        </a>
+      </nav>
+
+      <div class="glass-sidebar__footer">
+        <div class="glass-sidebar__status">
+          <span class="glass-sidebar__status-icon">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-shield"></use></svg>
+          </span>
+          <div>
+            <div class="glass-sidebar__status-title">本地处理 · 未上传</div>
+            <div class="glass-sidebar__status-sub">扫描与复制均在本机完成</div>
+          </div>
+        </div>
+
+        <div class="glass-dock" role="group" aria-label="外观模式">
+          <button class="glass-dock__btn" type="button" data-theme-set="light" data-tooltip="浅色外观" aria-label="浅色外观">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-sun"></use></svg>
+          </button>
+          <button class="glass-dock__btn" type="button" data-theme-set="system" data-tooltip="跟随系统" aria-label="跟随系统">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-monitor"></use></svg>
+          </button>
+          <button class="glass-dock__btn" type="button" data-theme-set="dark" data-tooltip="深色外观" aria-label="深色外观">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-moon"></use></svg>
+          </button>
+        </div>
+
+        <div class="glass-sidebar__version">v5.0.0 · Liquid Glass</div>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <main class="glass-main">
+
+      <div class="g-titlebar" aria-hidden="true">
+        <div class="g-titlebar__dots">
+          <span class="g-titlebar__dot g-titlebar__dot--close"></span>
+          <span class="g-titlebar__dot g-titlebar__dot--min"></span>
+          <span class="g-titlebar__dot g-titlebar__dot--max"></span>
+        </div>
+        <div class="g-titlebar__title">PhotoTakeout Studio — 整理 Takeout</div>
+        <div class="g-titlebar__meta">
+          <span class="g-status is-live"><span class="g-status__dot"></span>本地模式</span>
+        </div>
+      </div>
+
+      <header class="glass-header">
+        <div class="glass-header__text">
+          <h1 class="glass-title">整理 <em>Google Photos Takeout</em></h1>
+          <p class="glass-subtitle">选择目录、调整规则，先预览再执行。所有处理均在本机完成，不会上传任何照片。</p>
+        </div>
+        <div class="glass-header__actions">
+          <div class="g-search demo-search">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-search"></use></svg>
+            <input class="g-input" type="search" placeholder="搜索文件、相册或日期…" aria-label="搜索">
+            <span class="g-kbd g-search__kbd">Ctrl K</span>
+          </div>
+          <button class="g-btn g-btn--icon" type="button" data-theme-toggle data-tooltip="切换外观">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-sun"></use></svg>
+          </button>
+          <span class="g-badge is-success">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-shield"></use></svg>本地处理
+          </span>
+          <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#picker-modal">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg>选择目录
+          </button>
+        </div>
+      </header>
+
+      <div class="glass-main__body">
+
+        <!-- 统计概览 -->
+        <div class="g-grid g-grid--5 demo-stats" role="list" aria-label="扫描统计">
+          <div class="g-stat" role="listitem">
+            <div class="g-stat__head">
+              <span class="g-stat__icon"><svg class="g-icon" aria-hidden="true"><use href="#gi-photo"></use></svg></span>
+              <span class="g-stat__label">已发现媒体</span>
+            </div>
+            <div class="g-stat__value">12,486</div>
+            <div class="g-stat__delta is-up">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-arrow-up"></use></svg>较上次 +2.4%
+            </div>
+          </div>
+          <div class="g-stat" role="listitem">
+            <div class="g-stat__head">
+              <span class="g-stat__icon is-info"><svg class="g-icon" aria-hidden="true"><use href="#gi-layers"></use></svg></span>
+              <span class="g-stat__label">去重后媒体</span>
+            </div>
+            <div class="g-stat__value">11,932</div>
+            <div class="g-stat__delta">跳过 554 个副本</div>
+          </div>
+          <div class="g-stat" role="listitem">
+            <div class="g-stat__head">
+              <span class="g-stat__icon is-success"><svg class="g-icon" aria-hidden="true"><use href="#gi-copy"></use></svg></span>
+              <span class="g-stat__label">重复组</span>
+            </div>
+            <div class="g-stat__value">214</div>
+            <div class="g-stat__delta is-up">可回收 2.1 GB</div>
+          </div>
+          <div class="g-stat" role="listitem">
+            <div class="g-stat__head">
+              <span class="g-stat__icon is-warning"><svg class="g-icon" aria-hidden="true"><use href="#gi-warning"></use></svg></span>
+              <span class="g-stat__label">日期未知</span>
+            </div>
+            <div class="g-stat__value">87</div>
+            <div class="g-stat__delta is-warning">将放入 date-unknown</div>
+          </div>
+          <div class="g-stat" role="listitem">
+            <div class="g-stat__head">
+              <span class="g-stat__icon"><svg class="g-icon" aria-hidden="true"><use href="#gi-wand"></use></svg></span>
+              <span class="g-stat__label">计划动作</span>
+            </div>
+            <div class="g-stat__value">11,845</div>
+            <div class="g-stat__delta">复制 9,204 · 移动 2,641</div>
+          </div>
+        </div>
+
+        <!-- 目录与选项 -->
+        <section class="glass-card demo-setup" aria-label="整理选项">
+          <div class="demo-card__head">
+            <h2 class="demo-card__title">来源与目的</h2>
+            <span class="g-badge is-muted">未扫描</span>
+            <div class="g-spacer"></div>
+            <button class="g-btn g-btn--ghost g-btn--sm" type="button" data-collapse="#advanced-options" aria-expanded="true" aria-controls="advanced-options">
+              <span class="g-caret"><svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-down"></use></svg></span>
+              <span data-collapse-label>收起选项</span>
+            </button>
+            <button class="g-btn g-btn--ghost g-btn--sm" type="button" data-tooltip="恢复默认选项">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-refresh"></use></svg>重置
+            </button>
+          </div>
+
+          <div class="demo-setup__grid">
+            <div class="demo-paths">
+              <div class="g-field">
+                <label class="g-field__label" for="input-dir">
+                  <svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg>Takeout 输入目录
+                </label>
+                <div class="g-path">
+                  <input class="g-input g-input--mono" id="input-dir" value="D:\Takeout\Google Photos" spellcheck="false">
+                  <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#picker-modal">浏览…</button>
+                </div>
+              </div>
+              <div class="g-field">
+                <label class="g-field__label" for="output-dir">
+                  <svg class="g-icon" aria-hidden="true"><use href="#gi-hard-drive"></use></svg>整理结果输出目录
+                </label>
+                <div class="g-path">
+                  <input class="g-input g-input--mono" id="output-dir" value="D:\Photos\整理后" spellcheck="false">
+                  <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#picker-modal">浏览…</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="demo-options" id="advanced-options">
+              <div class="g-field">
+                <span class="g-field__label">处理方式</span>
+                <div class="g-segmented" data-segmented aria-label="处理方式">
+                  <button class="g-segment is-selected" type="button" data-value="copy">
+                    <svg class="g-icon" aria-hidden="true"><use href="#gi-copy"></use></svg>复制（推荐）
+                  </button>
+                  <button class="g-segment" type="button" data-value="move">
+                    <svg class="g-icon" aria-hidden="true"><use href="#gi-move"></use></svg>移动
+                  </button>
+                </div>
+              </div>
+              <div class="g-field">
+                <label class="g-field__label" for="album-mode">相册处理</label>
+                <select class="g-select" id="album-mode">
+                  <option>快捷方式（推荐，节省空间）</option>
+                  <option>复制到每个相册（最兼容）</option>
+                  <option>单目录 + 相册 JSON</option>
+                  <option>忽略相册，仅保留时间线</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="demo-options">
+              <div class="g-field">
+                <label class="g-field__label" for="date-division">目录结构</label>
+                <select class="g-select" id="date-division">
+                  <option>年 / 月目录（2023 / 2023-08）</option>
+                  <option>仅按年份</option>
+                  <option>全部放在同一目录</option>
+                </select>
+              </div>
+              <label class="g-switch">
+                <input type="checkbox" checked>
+                <span class="g-switch__track"></span>
+                <span class="g-switch__label">写入正确的文件修改时间</span>
+              </label>
+              <label class="g-switch">
+                <input type="checkbox" checked>
+                <span class="g-switch__track"></span>
+                <span class="g-switch__label">生成 JSON 运行报告</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 执行计划预览 -->
+        <section class="glass-card demo-preview" aria-label="执行计划预览">
+          <div class="demo-card__head">
+            <h2 class="demo-card__title">执行计划预览</h2>
+            <span class="g-badge is-muted">共 11,845 项</span>
+            <span class="g-hint">显示前 300 项 · 扫描于 22:14</span>
+            <div class="g-spacer"></div>
+            <div class="g-chip-group demo-preview__chips" data-log-filter-group>
+              <button class="g-chip is-active" type="button">全部</button>
+              <button class="g-chip" type="button">复制</button>
+              <button class="g-chip" type="button">移动</button>
+              <button class="g-chip" type="button">跳过</button>
+            </div>
+            <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#compare-modal">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-copy"></use></svg>重复项对比
+            </button>
+          </div>
+
+          <div class="g-table-wrap">
+            <div class="g-scroll">
+              <table class="g-table">
+                <colgroup>
+                  <col style="width: 92px">
+                  <col style="width: 32%">
+                  <col style="width: 33%">
+                  <col style="width: 136px">
+                  <col style="width: 118px">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">动作</th>
+                    <th scope="col">源文件</th>
+                    <th scope="col">目标文件</th>
+                    <th scope="col">拍摄日期</th>
+                    <th scope="col">相册</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="g-badge is-info">复制</span></td>
+                    <td><span class="g-table__path"><em>DCIM/Camera/</em><b>IMG_20230812_184233.jpg</b></span></td>
+                    <td><span class="g-table__path"><em>2023/2023-08/</em><b>IMG_20230812_184233.jpg</b></span></td>
+                    <td>2023-08-12 18:42</td>
+                    <td>时间线</td>
+                  </tr>
+                  <tr class="is-selected">
+                    <td><span class="g-badge is-accent">移动</span></td>
+                    <td><span class="g-table__path"><em>Google 相册/2023 夏 · 京都/</em><b>IMG_2043.JPG</b></span></td>
+                    <td><span class="g-table__path"><em>2023/2023-07/</em><b>IMG_2043.JPG</b></span></td>
+                    <td>2023-07-02 09:15</td>
+                    <td>2023 夏 · 京都</td>
+                  </tr>
+                  <tr>
+                    <td><span class="g-badge is-success">快捷方式</span></td>
+                    <td><span class="g-table__path"><em>Google 相册/家庭/</em><b>VID_20221224_2003.mp4</b></span></td>
+                    <td><span class="g-table__path"><em>2022/2022-12/</em><b>VID_20221224_2003.mp4</b></span></td>
+                    <td>2022-12-24 20:03</td>
+                    <td>家庭</td>
+                  </tr>
+                  <tr>
+                    <td><span class="g-badge is-muted">跳过</span></td>
+                    <td><span class="g-table__path"><em>Google 相册/2021 冬 · 长野/</em><b>IMG_0777-edited.jpg</b></span></td>
+                    <td><span class="g-table__path"><em>—</em></span></td>
+                    <td>2021-12-09 16:22</td>
+                    <td>额外版本</td>
+                  </tr>
+                  <tr>
+                    <td><span class="g-badge is-info">复制</span></td>
+                    <td><span class="g-table__path"><em>Google 相册/2024 春 · 樱花/</em><b>IMG_9911.HEIC</b></span></td>
+                    <td><span class="g-table__path"><em>2024/2024-03/</em><b>IMG_9911.HEIC</b></span></td>
+                    <td>2024-03-18 11:27</td>
+                    <td>2024 春 · 樱花</td>
+                  </tr>
+                  <tr>
+                    <td><span class="g-badge is-accent">移动</span></td>
+                    <td><span class="g-table__path"><em>Google 相册/视频/</em><b>IMG_1201.MOV</b></span></td>
+                    <td><span class="g-table__path"><em>2023/2023-11/</em><b>IMG_1201.MOV</b></span></td>
+                    <td>2023-11-05 07:41</td>
+                    <td>视频</td>
+                  </tr>
+                  <tr>
+                    <td><span class="g-badge is-info">复制</span></td>
+                    <td><span class="g-table__path"><em>DCIM/Camera/</em><b>IMG_3388.jpg</b></span></td>
+                    <td><span class="g-table__path"><em>date-unknown/</em><b>IMG_3388.jpg</b></span></td>
+                    <td><span class="g-muted">未知</span></td>
+                    <td>2020 毕业</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 底部操作条 -->
+      <div class="demo-actionbar-wrap">
+        <div class="glass-toolbar demo-actionbar">
+          <div class="demo-actionbar__status">
+            <div class="demo-actionbar__row">
+              <span class="g-status is-busy"><span class="g-status__dot"></span></span>
+              <span class="demo-actionbar__text">正在写入输出目录 · 第 <b>3,208</b> / 11,845 项 · 已复制 <b>8.4 GB</b></span>
+              <span class="g-badge is-accent">27%</span>
+            </div>
+            <div class="demo-actionbar__progress">
+              <div class="g-progress g-progress--glow" data-progress="27" aria-label="整理进度"></div>
+              <span class="g-hint">预计剩余 01:32</span>
+            </div>
+          </div>
+          <div class="demo-actionbar__buttons">
+            <button class="g-btn g-btn--ghost" type="button" data-tooltip="安全取消，已完成的文件会保留">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-pause"></use></svg>暂停
+            </button>
+            <button class="g-btn g-btn--secondary" type="button">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-scan"></use></svg>重新扫描
+            </button>
+            <button class="g-btn g-btn--primary" type="button" data-modal-open="#compare-modal">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-wand"></use></svg>开始整理
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ====================== 组件库 ====================== -->
+  <section class="demo-gallery" id="gallery" aria-label="组件库">
+
+    <div class="g-hero demo-hero">
+      <div class="g-hero__icon">
+        <svg class="g-icon" aria-hidden="true"><use href="#gi-sparkles"></use></svg>
+      </div>
+      <div class="g-hero__text">
+        <div class="demo-kicker"><span class="g-dot"></span>Liquid Glass Design System · v1.0</div>
+        <h2 class="demo-h2">液态玻璃组件库</h2>
+        <p class="demo-lead">
+          为 PhotoTakeout Studio 打造的 iOS 26 风格视觉系统：动态极光背景、多层半透明玻璃、指针镜面高光、弹性动效与完整暗色主题。
+          所有组件零外部依赖，可直接在真实页面中复用。
+        </p>
+      </div>
+      <div class="g-hero__actions">
+        <div class="g-segmented" data-theme-segmented aria-label="外观模式">
+          <button class="g-segment" type="button" data-value="light">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-sun"></use></svg>浅色
+          </button>
+          <button class="g-segment" type="button" data-value="system">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-monitor"></use></svg>系统
+          </button>
+          <button class="g-segment" type="button" data-value="dark">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-moon"></use></svg>深色
+          </button>
+        </div>
+        <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#compare-modal">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-copy"></use></svg>重复项对比
+        </button>
+        <button class="g-btn g-btn--primary g-btn--sm" type="button" data-modal-open="#picker-modal">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg>目录选择器
+        </button>
+      </div>
+    </div>
+
+    <div class="demo-sections">
+
+      <!-- 按钮 -->
+      <div class="glass-card demo-section demo-section--wide">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-wand"></use></svg>按钮 Button
+            </h3>
+            <p class="demo-section__desc">胶囊形按钮、弹性悬停与按压反馈；支持图标、尺寸、加载与禁用状态。点击可触发 Toast 反馈。</p>
+          </div>
+        </div>
+
+        <div class="demo-swatch-grid">
+          <div class="demo-block">
+        <div class="demo-swatch">
+          <span class="demo-label">类型</span>
+          <div class="demo-wrap">
+            <button class="g-btn g-btn--primary" type="button" data-toast="整理任务已加入队列，即将开始扫描。" data-toast-type="success" data-toast-title="开始整理">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-wand"></use></svg>开始整理
+            </button>
+            <button class="g-btn g-btn--secondary" type="button" data-toast="正在扫描 Takeout 目录…" data-toast-type="info">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-scan"></use></svg>扫描预览
+            </button>
+            <button class="g-btn g-btn--ghost" type="button" data-toast="任务已安全取消，已完成的文件会保留。" data-toast-type="warning">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-x"></use></svg>取消
+            </button>
+            <button class="g-btn g-btn--danger" type="button" data-toast="扫描指纹缓存已清理（12.4 MB）。" data-toast-type="error" data-toast-title="清理缓存">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-trash"></use></svg>清理缓存
+            </button>
+            <button class="g-btn g-btn--primary" type="button" disabled>已禁用</button>
+          </div>
+        </div>
+
+        <div class="demo-swatch">
+          <span class="demo-label">尺寸</span>
+          <div class="demo-wrap">
+            <button class="g-btn g-btn--primary g-btn--sm" type="button">小号 SM</button>
+            <button class="g-btn g-btn--primary" type="button">标准 36</button>
+            <button class="g-btn g-btn--primary g-btn--lg" type="button">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-play"></use></svg>大号 LG
+            </button>
+            <button class="g-btn g-btn--secondary" type="button" data-toast="正在生成计划…" data-toast-type="info">
+              <span class="g-spinner" aria-hidden="true"></span>加载中…
+            </button>
+          </div>
+        </div>
+
+          </div>
+          <div class="demo-block">
+        <div class="demo-swatch">
+          <span class="demo-label">图标</span>
+          <div class="demo-wrap">
+            <button class="g-btn g-btn--icon" type="button" data-tooltip="刷新列表">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-refresh"></use></svg>
+            </button>
+            <button class="g-btn g-btn--icon" type="button" data-tooltip="搜索">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-search"></use></svg>
+            </button>
+            <button class="g-btn g-btn--icon" type="button" data-tooltip="在资源管理器中打开">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-external-link"></use></svg>
+            </button>
+            <button class="g-btn g-btn--icon" type="button" data-tooltip="更多操作" data-tooltip-side="bottom">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-more"></use></svg>
+            </button>
+            <button class="g-btn g-btn--icon" type="button" data-tooltip="删除">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-trash"></use></svg>
+            </button>
+            <span class="demo-inline-note">悬停图标按钮查看 Tooltip</span>
+          </div>
+        </div>
+
+        <div class="demo-swatch">
+          <span class="demo-label">组合</span>
+          <div class="demo-wrap">
+            <div class="g-btn-group">
+              <button class="g-btn g-btn--secondary" type="button">
+                <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-left"></use></svg>上一组
+              </button>
+              <button class="g-btn g-btn--secondary" type="button">
+                下一组<svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+              </button>
+            </div>
+            <div class="g-btn-group">
+              <button class="g-btn g-btn--ghost" type="button" data-copy="D:\Takeout\Google Photos">复制路径</button>
+              <button class="g-btn g-btn--ghost" type="button" data-tooltip="打开运行日志">
+                <svg class="g-icon" aria-hidden="true"><use href="#gi-list"></use></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分段 / 开关 / 复选 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-sliders"></use></svg>分段与开关
+            </h3>
+            <p class="demo-section__desc">分段控件带滑动玻璃滑块；开关由纯 CSS 驱动，支持键盘操作与减弱动态效果。</p>
+          </div>
+        </div>
+
+        <div class="demo-block">
+          <span class="demo-label">分段控件</span>
+          <div class="g-segmented" data-segmented aria-label="视图模式">
+            <button class="g-segment is-selected" type="button" data-value="grid">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-grid"></use></svg>网格
+            </button>
+            <button class="g-segment" type="button" data-value="list">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-list"></use></svg>列表
+            </button>
+            <button class="g-segment" type="button" data-value="timeline">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-timeline"></use></svg>时间线
+            </button>
+          </div>
+          <div class="g-segmented g-segmented--block" data-segmented aria-label="日志级别">
+            <button class="g-segment" type="button" data-value="all">全部</button>
+            <button class="g-segment" type="button" data-value="info">INFO</button>
+            <button class="g-segment is-selected" type="button" data-value="warning">WARNING</button>
+            <button class="g-segment" type="button" data-value="error">ERROR</button>
+          </div>
+        </div>
+
+        <div class="demo-divider"></div>
+
+        <div class="demo-block">
+          <span class="demo-label">iOS 开关</span>
+          <label class="g-switch">
+            <input type="checkbox" checked>
+            <span class="g-switch__track"></span>
+            <span class="g-switch__text">
+              <span class="g-switch__label">写入正确的文件修改时间</span>
+              <span class="g-switch__desc">从拍摄日期恢复文件系统 mtime</span>
+            </span>
+          </label>
+          <label class="g-switch">
+            <input type="checkbox">
+            <span class="g-switch__track"></span>
+            <span class="g-switch__text">
+              <span class="g-switch__label">识别并配对实况照片（Live Photo）</span>
+              <span class="g-switch__desc">按内容确认，不转码</span>
+            </span>
+          </label>
+          <label class="g-switch g-switch--sm">
+            <input type="checkbox" checked>
+            <span class="g-switch__track"></span>
+            <span class="g-switch__label">包含隐藏文件与隐藏目录</span>
+          </label>
+        </div>
+
+        <div class="demo-divider"></div>
+
+        <div class="demo-block">
+          <span class="demo-label">复选与单选</span>
+          <label class="g-check">
+            <input type="checkbox" checked>
+            <span class="g-check__box"></span>
+            <span class="g-check__text">
+              <span class="g-check__label">按拍摄日期修正日期型文件名</span>
+              <span class="g-check__desc">仅处理 YYYY-MM-DD(编号) 完整格式</span>
+            </span>
+          </label>
+          <label class="g-check">
+            <input type="checkbox">
+            <span class="g-check__box"></span>
+            <span class="g-check__text">
+              <span class="g-check__label">跳过编辑版、特效版等额外副本</span>
+            </span>
+          </label>
+          <label class="g-radio">
+            <input type="radio" name="demo-album" checked>
+            <span class="g-radio__dot"></span>快捷方式（推荐）
+          </label>
+          <label class="g-radio">
+            <input type="radio" name="demo-album">
+            <span class="g-radio__dot"></span>复制到每个相册
+          </label>
+        </div>
+      </div>
+
+      <!-- 表单 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-file"></use></svg>表单与输入
+            </h3>
+            <p class="demo-section__desc">内嵌玻璃输入框、选择器、搜索与滑块；聚焦时呈现 iOS 风格强调环。</p>
+          </div>
+        </div>
+
+        <div class="demo-form-grid">
+          <div class="g-field">
+            <label class="g-field__label" for="demo-folder-name">总照片目录名称</label>
+            <input class="g-input" id="demo-folder-name" value="ALL_PHOTOS">
+            <span class="g-field__hint">用于存放不属于任何相册的时间线照片</span>
+          </div>
+          <div class="g-field">
+            <label class="g-field__label" for="demo-unknown-name">未知日期目录名称</label>
+            <input class="g-input g-input--invalid" id="demo-unknown-name" value="date-unknown" aria-invalid="true">
+            <span class="g-field__hint g-field__hint--danger">目录名不能包含 &lt; &gt; : &quot; / \ | ? *</span>
+          </div>
+        </div>
+
+        <div class="g-field">
+          <label class="g-field__label" for="demo-conflict">同名文件处理</label>
+          <select class="g-select" id="demo-conflict">
+            <option>自动重命名（推荐）</option>
+            <option>跳过同名文件</option>
+            <option>覆盖同名文件（危险）</option>
+          </select>
+        </div>
+
+        <div class="g-field">
+          <span class="g-field__label">搜索</span>
+          <div class="g-search">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-search"></use></svg>
+            <input class="g-input" type="search" placeholder="搜索文件名、相册或日期…">
+            <span class="g-kbd g-search__kbd">/</span>
+          </div>
+        </div>
+
+        <div class="g-field">
+          <div class="demo-slider-row">
+            <span class="g-field__label" style="padding:0">并发线程</span>
+            <input class="g-slider" type="range" min="1" max="16" step="1" value="4" data-slider-output="#threads-out" data-slider-suffix=" 线程" aria-label="并发线程">
+            <span class="demo-slider-value" id="threads-out">4 线程</span>
+          </div>
+          <span class="g-field__hint">推荐 4–8；SSD 与外接硬盘可适当提高</span>
+        </div>
+
+        <div class="demo-kbd-row">
+          <span class="g-kbd">Ctrl</span><span class="g-kbd">Enter</span>
+          <span class="demo-inline-note">开始扫描预览</span>
+          <span style="width:8px"></span>
+          <span class="g-kbd">Esc</span>
+          <span class="demo-inline-note">取消当前任务 / 关闭弹窗</span>
+        </div>
+      </div>
+
+      <!-- 徽章 / 标签 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-bookmark"></use></svg>徽章与状态
+            </h3>
+            <p class="demo-section__desc">胶囊徽章承载状态语义；标签用于展示格式、来源与路径等元信息。</p>
+          </div>
+        </div>
+
+        <div class="demo-block">
+          <span class="demo-label">状态徽章</span>
+          <div class="demo-wrap">
+            <span class="g-badge is-success"><span class="g-dot"></span>已完成</span>
+            <span class="g-badge is-info"><span class="g-dot"></span>进行中</span>
+            <span class="g-badge is-warning"><svg class="g-icon" aria-hidden="true"><use href="#gi-warning"></use></svg>日期未知</span>
+            <span class="g-badge is-error"><svg class="g-icon" aria-hidden="true"><use href="#gi-error"></use></svg>失败 3</span>
+            <span class="g-badge is-muted">已跳过</span>
+            <span class="g-badge is-accent">实况照片</span>
+            <span class="g-badge g-badge--solid">推荐</span>
+            <span class="g-badge g-badge--lg is-success"><svg class="g-icon" aria-hidden="true"><use href="#gi-shield"></use></svg>本地处理</span>
+          </div>
+        </div>
+
+        <div class="demo-block">
+          <span class="demo-label">标签</span>
+          <div class="demo-wrap">
+            <span class="g-tag">JPEG</span>
+            <span class="g-tag">HEIC</span>
+            <span class="g-tag">MP4</span>
+            <span class="g-tag">Live Photo</span>
+            <span class="g-tag g-tag--mono">SHA-256 · 4a7f…e1c2</span>
+            <span class="g-tag"><svg class="g-icon" aria-hidden="true"><use href="#gi-calendar"></use></svg>EXIF</span>
+          </div>
+        </div>
+
+        <div class="demo-block">
+          <span class="demo-label">筛选 Chip</span>
+          <div class="g-chip-group">
+            <button class="g-chip is-active" type="button">全部</button>
+            <button class="g-chip" type="button"><svg class="g-icon" aria-hidden="true"><use href="#gi-photo"></use></svg>照片</button>
+            <button class="g-chip" type="button"><svg class="g-icon" aria-hidden="true"><use href="#gi-video"></use></svg>视频</button>
+            <button class="g-chip" type="button"><svg class="g-icon" aria-hidden="true"><use href="#gi-repeat"></use></svg>实况</button>
+            <button class="g-chip" type="button"><svg class="g-icon" aria-hidden="true"><use href="#gi-warning"></use></svg>未知日期</button>
+          </div>
+        </div>
+
+        <div class="demo-block">
+          <span class="demo-label">运行状态</span>
+          <div class="demo-wrap" style="gap:18px">
+            <span class="g-status is-live"><span class="g-status__dot"></span>本地模式</span>
+            <span class="g-status is-busy"><span class="g-status__dot"></span>正在复制</span>
+            <span class="g-status"><span class="g-status__dot"></span>等待中</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 统计与进度 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-timeline"></use></svg>统计与进度
+            </h3>
+            <p class="demo-section__desc">统计卡片、线性进度、环形进度、加载指示与骨架屏。</p>
+          </div>
+        </div>
+
+        <div class="demo-stat-grid">
+          <div class="g-stat">
+            <div class="g-stat__head">
+              <span class="g-stat__icon"><svg class="g-icon" aria-hidden="true"><use href="#gi-hard-drive"></use></svg></span>
+              <span class="g-stat__label">将写入</span>
+            </div>
+            <div class="g-stat__value">48.6<small>GB</small></div>
+            <div class="g-stat__delta">剩余空间 212 GB</div>
+          </div>
+          <div class="g-stat">
+            <div class="g-stat__head">
+              <span class="g-stat__icon is-success"><svg class="g-icon" aria-hidden="true"><use href="#gi-repeat"></use></svg></span>
+              <span class="g-stat__label">实况配对</span>
+            </div>
+            <div class="g-stat__value">42<small>组</small></div>
+            <div class="g-stat__delta is-up">完整 40 / 42</div>
+          </div>
+          <div class="g-stat">
+            <div class="g-stat__head">
+              <span class="g-stat__icon is-danger"><svg class="g-icon" aria-hidden="true"><use href="#gi-clock"></use></svg></span>
+              <span class="g-stat__label">耗时</span>
+            </div>
+            <div class="g-stat__value">00:42</div>
+            <div class="g-stat__delta">已完成 3,208 项</div>
+          </div>
+        </div>
+
+        <div class="demo-progress-list">
+          <div class="demo-progress-item">
+            <div class="demo-progress-item__head"><span>正在扫描媒体</span><b>68%</b></div>
+            <div class="g-progress g-progress--glow" data-progress="68"></div>
+          </div>
+          <div class="demo-progress-item">
+            <div class="demo-progress-item__head"><span>正在复制 · 3,208 / 11,845</span><b>27%</b></div>
+            <div class="g-progress" data-progress="27"></div>
+          </div>
+          <div class="demo-progress-item">
+            <div class="demo-progress-item__head"><span>不确定进度（写入中）</span><b>—</b></div>
+            <div class="g-progress g-progress--indeterminate g-progress--sm"><div class="g-progress__bar"></div></div>
+          </div>
+        </div>
+
+        <div class="demo-ring-row">
+          <div class="g-progress-ring" data-progress-ring="27">
+            <span class="g-progress-ring__label">27%</span>
+          </div>
+          <div class="g-progress-ring g-progress-ring--sm" data-progress-ring="82" style="--stroke:4px">
+            <span class="g-progress-ring__label">82%</span>
+          </div>
+          <span class="g-spinner g-spinner--lg" aria-label="加载中"></span>
+          <span class="g-spinner g-spinner--muted"></span>
+          <div style="flex:1;min-width:140px;display:flex;flex-direction:column;gap:8px">
+            <span class="g-skeleton g-skeleton--title"></span>
+            <span class="g-skeleton"></span>
+            <span class="g-skeleton" style="width:76%"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 日志 -->
+      <div class="glass-card demo-section demo-section--wide">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-list"></use></svg>运行日志
+            </h3>
+            <p class="demo-section__desc">等宽字体、分级色彩、行悬停高亮与级别筛选；可整体滚动。</p>
+          </div>
+          <div class="g-spacer"></div>
+          <div class="demo-log-toolbar">
+            <div class="g-chip-group" data-log-filter-group>
+              <button class="g-chip is-active" type="button" data-log-filter="all" data-log-target="#demo-log" aria-pressed="true">全部</button>
+              <button class="g-chip" type="button" data-log-filter="info" data-log-target="#demo-log" aria-pressed="false">INFO</button>
+              <button class="g-chip" type="button" data-log-filter="warning" data-log-target="#demo-log" aria-pressed="false">WARNING</button>
+              <button class="g-chip" type="button" data-log-filter="error" data-log-target="#demo-log" aria-pressed="false">ERROR</button>
+            </div>
+            <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-toast="日志已导出到 运行日志-20240512.log" data-toast-type="success" data-toast-title="导出日志">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-download"></use></svg>导出日志
+            </button>
+            <button class="g-btn g-btn--ghost g-btn--sm" type="button">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-trash"></use></svg>清空
+            </button>
+          </div>
+        </div>
+
+        <div class="g-log" id="demo-log" role="log" aria-label="运行日志" style="max-height:248px">
+          <div class="g-log__line is-info">
+            <span class="g-log__time">22:14:32</span><span class="g-log__level">INFO</span>
+            <span class="g-log__msg">扫描完成：发现 <b>12,486</b> 个媒体文件，跳过 <b>58</b> 个隐藏文件，忽略 <b>12</b> 个非媒体文件</span>
+          </div>
+          <div class="g-log__line is-info">
+            <span class="g-log__time">22:14:33</span><span class="g-log__level">INFO</span>
+            <span class="g-log__msg">读取 JSON 边车：命中 <b>11,902</b> / 缺失 <b>584</b>；EXIF 命中 <b>9,331</b>；文件名推断 <b>1,244</b></span>
+          </div>
+          <div class="g-log__line is-debug">
+            <span class="g-log__time">22:14:33</span><span class="g-log__level">DEBUG</span>
+            <span class="g-log__msg">hash-cache 命中 <b>11,402</b>，未命中 <b>1,030</b>；缓存文件 <span class="gl-path">%LOCALAPPDATA%\PhotoTakeout\scan-cache.json</span></span>
+          </div>
+          <div class="g-log__line is-warning">
+            <span class="g-log__time">22:14:35</span><span class="g-log__level">WARN</span>
+            <span class="g-log__msg">相册「2021 冬 · 长野」中存在 <b>3</b> 组同内容文件，保留主文件并跳过副本；可回收 <b>18.6 MB</b></span>
+          </div>
+          <div class="g-log__line is-info">
+            <span class="g-log__time">22:14:37</span><span class="g-log__level">INFO</span>
+            <span class="g-log__msg">实况照片配对完成：<b>42</b> 组，Apple 元数据完整 <b>40</b>/42，后缀修复 <b>2</b>，歧义候选 <b>1</b></span>
+          </div>
+          <div class="g-log__line is-error">
+            <span class="g-log__time">22:14:39</span><span class="g-log__level">ERROR</span>
+            <span class="g-log__msg">无法读取 <span class="gl-path">…\2023 夏 · 京都\IMG_0931.HEIC</span> 的 EXIF：Missing decoder for HEIC；已回退到 JSON 与文件名日期</span>
+          </div>
+          <div class="g-log__line is-success">
+            <span class="g-log__time">22:14:41</span><span class="g-log__level">OK</span>
+            <span class="g-log__msg">执行计划已生成：<b>11,845</b> 个动作，预计写入 <b>48.6 GB</b>；未知日期 <b>87</b> 个将放入 date-unknown</span>
+          </div>
+          <div class="g-log__line is-info">
+            <span class="g-log__time">22:14:44</span><span class="g-log__level">INFO</span>
+            <span class="g-log__msg">开始执行：复制 <b>9,204</b> / 移动 <b>2,641</b> / 快捷方式 <b>0</b>（Windows 使用相册 JSON 记录）</span>
+          </div>
+          <div class="g-log__line is-info">
+            <span class="g-log__time">22:15:02</span><span class="g-log__level">INFO</span>
+            <span class="g-log__msg">写入进度 <b>3,208</b> / 11,845 · 当前 <span class="gl-path">2023\2023-08\IMG_20230812_184233.jpg</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 列表 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-gear"></use></svg>分组列表与详情
+            </h3>
+            <p class="demo-section__desc">iOS 设置式 inset 列表；右侧详情行用于展示文件元数据。</p>
+          </div>
+        </div>
+
+        <div class="g-list">
+          <div class="g-list__head">界面设置</div>
+          <div class="g-list__row">
+            <span class="g-list__icon"><svg class="g-icon" aria-hidden="true"><use href="#gi-sun"></use></svg></span>
+            <span class="g-list__text">
+              <span class="g-list__label">外观模式</span>
+              <span class="g-list__desc">跟随系统动态切换浅色 / 深色玻璃材质</span>
+            </span>
+            <span class="g-list__value" data-theme-label>跟随系统
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+            </span>
+          </div>
+          <div class="g-list__row">
+            <span class="g-list__icon is-gray"><svg class="g-icon" aria-hidden="true"><use href="#gi-grid"></use></svg></span>
+            <span class="g-list__text">
+              <span class="g-list__label">每批预览行数</span>
+              <span class="g-list__desc">大目录下减少渲染压力</span>
+            </span>
+            <span class="g-list__value">300
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+            </span>
+          </div>
+          <div class="g-list__row">
+            <span class="g-list__icon is-green"><svg class="g-icon" aria-hidden="true"><use href="#gi-hard-drive"></use></svg></span>
+            <span class="g-list__text">
+              <span class="g-list__label">扫描指纹缓存</span>
+              <span class="g-list__desc">仅保存路径、文件状态与 SHA-256</span>
+            </span>
+            <span class="g-list__value">12.4 MB
+              <button class="g-btn g-btn--secondary g-btn--sm" type="button">清理</button>
+            </span>
+          </div>
+          <div class="g-list__row">
+            <span class="g-list__icon is-pink"><svg class="g-icon" aria-hidden="true"><use href="#gi-lock"></use></svg></span>
+            <span class="g-list__text">
+              <span class="g-list__label">记住最近使用的目录</span>
+              <span class="g-list__desc">仅在本机保存路径，不含文件内容</span>
+            </span>
+            <span class="g-list__value">
+              <label class="g-switch g-switch--sm">
+                <input type="checkbox" checked>
+                <span class="g-switch__track"></span>
+              </label>
+            </span>
+          </div>
+        </div>
+
+        <div class="demo-divider"></div>
+
+        <div class="g-detail-grid">
+          <div class="g-detail-row">
+            <span class="g-detail-row__label">文件名</span>
+            <span class="g-detail-row__value g-mono">IMG_20230812_184233.jpg</span>
+          </div>
+          <div class="g-detail-row">
+            <span class="g-detail-row__label">拍摄日期</span>
+            <span class="g-detail-row__value">2023-08-12 18:42:33 <span class="g-tag">EXIF</span></span>
+          </div>
+          <div class="g-detail-row">
+            <span class="g-detail-row__label">尺寸 / 大小</span>
+            <span class="g-detail-row__value">4032 × 3024 · 4.2 MB</span>
+          </div>
+          <div class="g-detail-row">
+            <span class="g-detail-row__label">来源相册</span>
+            <span class="g-detail-row__value">2023 夏 · 京都 <span class="g-muted">（11 个文件）</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabs + 折叠 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-layers"></use></svg>Tabs 与折叠
+            </h3>
+            <p class="demo-section__desc">顶部标签页切换面板；折叠面板使用 grid-template-rows 动画，高度过渡自然。</p>
+          </div>
+        </div>
+
+        <div class="g-tabs" data-tabs data-tab-scope="#demo-tab-panels" role="tablist">
+          <button class="g-tab is-active" type="button" role="tab" data-tab="basic">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg>基础选项
+          </button>
+          <button class="g-tab" type="button" data-tab="advanced">高级选项</button>
+          <button class="g-tab" type="button" data-tab="about">关于</button>
+        </div>
+
+        <div id="demo-tab-panels">
+          <div data-tab-panel="basic">
+            <div class="demo-form-grid">
+              <div class="g-field">
+                <span class="g-field__label">处理方式</span>
+                <div class="g-segmented" data-segmented>
+                  <button class="g-segment is-selected" type="button" data-value="copy">复制</button>
+                  <button class="g-segment" type="button" data-value="move">移动</button>
+                </div>
+              </div>
+              <label class="g-switch">
+                <input type="checkbox" checked>
+                <span class="g-switch__track"></span>
+                <span class="g-switch__label">写入文件修改时间</span>
+              </label>
+            </div>
+          </div>
+          <div data-tab-panel="advanced" hidden>
+            <div class="g-notice">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-info"></use></svg>
+              <span>高级选项会影响去重与日期提取的准确性，除非明确知道后果，否则建议保持默认。</span>
+            </div>
+            <div class="demo-wrap" style="margin-top:10px">
+              <span class="g-tag">JSON</span><span class="g-tag">EXIF</span><span class="g-tag">文件名</span><span class="g-tag">深度匹配 JSON</span>
+            </div>
+          </div>
+          <div data-tab-panel="about" hidden>
+            <p class="demo-inline-note" style="line-height:1.7">
+              PhotoTakeout Studio 不会上传照片；所有扫描、哈希与复制均在本机执行。首次使用请选择「复制」模式并保留原始压缩包。
+            </p>
+          </div>
+        </div>
+
+        <div class="demo-divider"></div>
+
+        <div class="demo-block">
+          <div class="demo-card__head">
+            <h4 class="demo-card__title">日期来源（可折叠）</h4>
+            <div class="g-spacer"></div>
+            <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-collapse="#demo-collapse" aria-expanded="true">
+              <span class="g-caret"><svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-down"></use></svg></span>收起
+            </button>
+          </div>
+          <div class="g-collapse is-open" id="demo-collapse">
+            <div>
+              <div class="demo-wrap">
+                <label class="g-check"><input type="checkbox" checked><span class="g-check__box"></span>Google Photos JSON</label>
+                <label class="g-check"><input type="checkbox" checked><span class="g-check__box"></span>EXIF</label>
+                <label class="g-check"><input type="checkbox" checked><span class="g-check__box"></span>文件名</label>
+                <label class="g-check"><input type="checkbox"><span class="g-check__box"></span>文件修改时间</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 缩略图 & 对比 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-photo"></use></svg>缩略图与对比
+            </h3>
+            <p class="demo-section__desc">玻璃缩略图、叠加徽章、视频播放浮层；重复项对比卡片用于只读比较两个物理文件。</p>
+          </div>
+          <div class="g-spacer"></div>
+          <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#compare-modal">
+            打开对比
+          </button>
+        </div>
+
+        <div class="demo-thumb-grid">
+          <div class="g-thumb g-thumb--hover-zoom">
+            <svg viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#art-lake"></use></svg>
+            <div class="g-thumb__shade"></div>
+            <div class="g-thumb__top"><span class="g-badge">JPEG</span></div>
+            <div class="g-thumb__bottom">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-calendar"></use></svg>
+              <span>2023-08-12</span>
+            </div>
+          </div>
+          <div class="g-thumb g-thumb--hover-zoom">
+            <svg viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#art-forest"></use></svg>
+            <div class="g-thumb__shade"></div>
+            <div class="g-thumb__top"><span class="g-badge is-accent">Live Photo</span></div>
+            <div class="g-thumb__bottom">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-repeat"></use></svg>
+              <span>HEIC + MOV</span>
+            </div>
+          </div>
+          <div class="g-thumb g-thumb--hover-zoom">
+            <svg viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#art-city"></use></svg>
+            <div class="g-thumb__shade"></div>
+            <div class="g-thumb__top"><span class="g-badge">MP4</span></div>
+            <div class="g-thumb__play"><svg class="g-icon" aria-hidden="true"><use href="#gi-play"></use></svg></div>
+            <div class="g-thumb__bottom">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-clock"></use></svg>
+              <span>00:24</span>
+            </div>
+          </div>
+          <div class="g-thumb g-thumb--hover-zoom">
+            <svg viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#art-flower"></use></svg>
+            <div class="g-thumb__shade"></div>
+            <div class="g-thumb__check"><svg class="g-icon" aria-hidden="true"><use href="#gi-check"></use></svg></div>
+            <div class="g-thumb__bottom">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-eye"></use></svg>
+              <span>已选择</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-wrap">
+          <span class="demo-inline-note">对比卡片内包含缩略图、元数据行、主文件/相册来源徽章与底部操作，点击右上角按钮查看完整模态。</span>
+        </div>
+
+        <div class="g-detail-grid">
+          <div class="g-detail-row">
+            <span class="g-detail-row__label">当前对比</span>
+            <span class="g-detail-row__value">第 3 组 / 共 214 组 · IMG_20230812_184233.jpg</span>
+          </div>
+          <div class="g-detail-row">
+            <span class="g-detail-row__label">缩略图</span>
+            <span class="g-detail-row__value">本机解码 · 360 × 240 · 只读，不写入输出目录</span>
+          </div>
+        </div>
+
+        <div class="g-notice">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-bookmark"></use></svg>
+          <span>点击缩略图可在对比模态中查看完整元数据；实况照片会同时显示 HEIC 静态图与 MOV 动态片段。</span>
+        </div>
+      </div>
+
+      <!-- 空状态 / 通知 / 材质 -->
+      <div class="glass-card demo-section">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-sparkles"></use></svg>空状态与材质
+            </h3>
+            <p class="demo-section__desc">空状态引导、提示条与三种玻璃材质层级。</p>
+          </div>
+        </div>
+
+        <div class="g-empty" style="padding:22px 16px">
+          <span class="g-empty__icon">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-search"></use></svg>
+          </span>
+          <span class="g-empty__title">尚未生成执行计划</span>
+          <span class="g-empty__desc">选择 Takeout 目录并点击「扫描预览」，确认无误后再开始整理。</span>
+          <span class="g-empty__actions">
+            <button class="g-btn g-btn--secondary g-btn--sm" type="button">浏览目录</button>
+            <button class="g-btn g-btn--primary g-btn--sm" type="button" data-toast="开始扫描 Takeout 目录…" data-toast-type="info">扫描预览</button>
+          </span>
+        </div>
+
+        <div class="g-table-wrap" style="border-radius:var(--r-lg)">
+          <div class="g-table__empty" style="min-height:150px">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-scan"></use></svg>
+            <span class="g-table__empty-title">尚未扫描</span>
+            <span>扫描完成后，这里会显示执行计划预览。</span>
+          </div>
+        </div>
+
+        <div class="g-notice">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-shield"></use></svg>
+          <span>本工具不会上传照片；所有扫描与复制均在本机执行。</span>
+        </div>
+        <div class="g-notice is-warning">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-warning"></use></svg>
+          <span>移动和覆盖模式会改变现有文件；确认输出无误后再清理原始压缩包。</span>
+        </div>
+        <div class="g-notice is-danger">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-error"></use></svg>
+          <span>输入目录与输出目录不能相同。</span>
+        </div>
+
+        <div class="demo-material-grid">
+          <div class="g-glass g-glass--strong demo-material">
+            <span class="demo-material__name">强材质 · Strong</span>
+            <span class="demo-material__desc">模态、主面板与底部操作条</span>
+          </div>
+          <div class="g-glass demo-material">
+            <span class="demo-material__name">标准材质 · Regular</span>
+            <span class="demo-material__desc">侧栏、卡片容器与列表</span>
+          </div>
+          <div class="g-glass g-glass--subtle demo-material">
+            <span class="demo-material__name">通透材质 · Subtle</span>
+            <span class="demo-material__desc">内嵌分组、统计卡片与输入框</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 浮层 / 反馈 -->
+      <div class="glass-card demo-section demo-section--wide">
+        <div class="demo-section__head">
+          <div>
+            <h3 class="demo-section__title">
+              <svg class="g-icon" aria-hidden="true"><use href="#gi-info"></use></svg>浮层与反馈
+            </h3>
+            <p class="demo-section__desc">Toast 堆叠、模态关闭方式、Tooltip 与 Sheet 面板。</p>
+          </div>
+        </div>
+
+        <div class="demo-overlay-grid">
+          <div class="demo-block">
+            <span class="demo-label">Toast 反馈</span>
+            <div class="demo-modal-demo">
+              <button class="g-btn g-btn--primary g-btn--sm" type="button" data-toast="整理任务已完成：11,845 个动作，耗时 02:14。" data-toast-type="success" data-toast-title="任务完成">
+                成功 Toast
+              </button>
+              <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-toast="扫描发现 87 个文件无法确定拍摄日期，将放入 date-unknown。" data-toast-type="warning" data-toast-title="需要注意">
+                警告 Toast
+              </button>
+              <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-toast="无法写入 D:\Photos\整理后：磁盘空间不足。" data-toast-type="error" data-toast-title="写入失败">
+                错误 Toast
+              </button>
+              <button class="g-btn g-btn--ghost g-btn--sm" type="button" data-toast="正在读取 EXIF 元数据…" data-toast-type="info">
+                信息 Toast
+              </button>
+            </div>
+            <span class="demo-label">模态与浮层</span>
+            <div class="demo-wrap">
+              <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#picker-modal">打开目录选择器</button>
+              <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-open="#compare-modal">打开重复项对比</button>
+              <button class="g-btn g-btn--ghost g-btn--sm" type="button" data-tooltip="按 Esc、点击遮罩或右上角叉号关闭" data-tooltip-side="bottom">关闭方式说明</button>
+            </div>
+            <p class="demo-inline-note">消息会出现在视口底部居中位置，超时自动消失，点击也可关闭。</p>
+          </div>
+
+          <div class="g-sheet">
+            <div class="g-sheet__handle" aria-hidden="true"></div>
+            <div class="g-sheet__content">
+              <div class="g-row">
+                <span class="g-avatar g-avatar--squircle"><svg class="g-icon" aria-hidden="true"><use href="#gi-photo"></use></svg></span>
+                <div class="g-col" style="gap:1px">
+                  <span style="font-size:13px;font-weight:650">底部 Sheet 面板</span>
+                  <span class="g-muted" style="font-size:11.5px">用于移动端抽屉、确认操作或快速设置</span>
+                </div>
+                <div class="g-spacer"></div>
+                <button class="g-btn g-btn--primary g-btn--sm" type="button">确认</button>
+              </div>
+              <div class="g-divider"></div>
+              <div class="g-detail-grid">
+                <div class="g-detail-row">
+                  <span class="g-detail-row__label">材质</span>
+                  <span class="g-detail-row__value">.g-sheet · 强玻璃 + 顶部内高光</span>
+                </div>
+                <div class="g-detail-row">
+                  <span class="g-detail-row__label">用途</span>
+                  <span class="g-detail-row__value">移动端底部抽屉 / 桌面端侧滑面板</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <footer style="text-align:center;padding:8px 0 0">
+      <p class="g-hint">PhotoTakeout Studio · Liquid Glass Design System · 无外部字体 / 图标 / 网络依赖</p>
+    </footer>
+  </section>
+
+  <!-- ====================== 模态：重复项对比 ====================== -->
+  <div class="g-modal g-modal--wide" id="compare-modal" data-focus="sheet" aria-hidden="true" aria-labelledby="compare-title">
+    <div class="g-modal__backdrop"></div>
+    <div class="g-modal__sheet" role="document">
+      <header class="g-modal__header">
+        <div class="g-modal__header-text">
+          <h2 class="g-modal__title" id="compare-title">重复项对比</h2>
+          <p class="g-modal__subtitle">第 3 组 / 共 214 组 · 内容完全一致（SHA-256 相同）· 只读预览，不会修改任何文件</p>
+        </div>
+        <span class="g-badge is-warning"><svg class="g-icon" aria-hidden="true"><use href="#gi-repeat"></use></svg>2 个副本</span>
+        <button class="g-modal__close" type="button" data-modal-close aria-label="关闭">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-x"></use></svg>
+        </button>
+      </header>
+
+      <div class="g-modal__body">
+        <div class="g-compare">
+          <!-- 左侧：主文件 -->
+          <div class="g-compare__side is-primary">
+            <div class="g-compare__head">
+              <span class="g-badge is-success">主文件</span>
+              <span class="g-compare__title">IMG_20230812_184233.jpg</span>
+              <div class="g-compare__nav">
+                <button class="g-btn g-btn--icon g-btn--sm" type="button" data-tooltip="上一组" aria-label="上一组">
+                  <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-left"></use></svg>
+                </button>
+                <button class="g-btn g-btn--icon g-btn--sm" type="button" data-tooltip="下一组" aria-label="下一组">
+                  <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="g-thumb g-thumb--hover-zoom">
+              <svg viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#art-lake"></use></svg>
+              <div class="g-thumb__shade"></div>
+              <div class="g-thumb__top">
+                <span class="g-badge is-success">主文件</span>
+                <span class="g-badge is-accent">Live Photo</span>
+                <span class="g-badge">JPEG</span>
+              </div>
+              <div class="g-thumb__bottom">
+                <svg class="g-icon" aria-hidden="true"><use href="#gi-photo"></use></svg>
+                <span>4032 × 3024 · 4.2 MB</span>
+                <span style="margin-left:auto">2023-08-12 18:42</span>
+              </div>
+            </div>
+
+            <div class="g-detail-grid g-compare__details">
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">文件路径</span>
+                <span class="g-detail-row__value"><span class="demo-compare__path">D:\Takeout\Google Photos\2023\IMG_20230812_184233.jpg</span></span>
+              </div>
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">拍摄日期</span>
+                <span class="g-detail-row__value">2023-08-12 18:42:33 <span class="g-tag">EXIF</span></span>
+              </div>
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">相册</span>
+                <span class="g-detail-row__value">时间线</span>
+              </div>
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">处理方式</span>
+                <span class="g-detail-row__value">保留 · 复制到 2023/2023-08/</span>
+              </div>
+            </div>
+
+            <div class="g-compare__foot">
+              <label class="g-check">
+                <input type="checkbox" checked>
+                <span class="g-check__box"></span>
+                <span class="g-check__label">保留此文件</span>
+              </label>
+              <div class="g-spacer"></div>
+              <span class="g-tag g-tag--mono">4a7f…e1c2</span>
+            </div>
+          </div>
+
+          <div class="g-compare__vs" aria-hidden="true">VS</div>
+
+          <!-- 右侧：相册来源 -->
+          <div class="g-compare__side">
+            <div class="g-compare__head">
+              <span class="g-badge is-accent">相册来源</span>
+              <span class="g-compare__title">IMG_20230812_184233(1).jpg</span>
+              <div class="g-compare__nav">
+                <button class="g-btn g-btn--icon g-btn--sm" type="button" data-tooltip="上一组" aria-label="上一组">
+                  <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-left"></use></svg>
+                </button>
+                <button class="g-btn g-btn--icon g-btn--sm" type="button" data-tooltip="下一组" aria-label="下一组">
+                  <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="g-thumb g-thumb--hover-zoom">
+              <svg viewBox="0 0 640 480" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#art-lake"></use></svg>
+              <div class="g-thumb__shade"></div>
+              <div class="g-thumb__top">
+                <span class="g-badge is-accent">相册来源</span>
+                <span class="g-badge">JPEG</span>
+              </div>
+              <div class="g-thumb__bottom">
+                <svg class="g-icon" aria-hidden="true"><use href="#gi-photo"></use></svg>
+                <span>4032 × 3024 · 4.2 MB</span>
+                <span style="margin-left:auto">2023-08-12 18:42</span>
+              </div>
+            </div>
+
+            <div class="g-detail-grid g-compare__details">
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">文件路径</span>
+                <span class="g-detail-row__value"><span class="demo-compare__path">D:\Takeout\Google Photos\2023 夏 · 京都\IMG_20230812_184233(1).jpg</span></span>
+              </div>
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">拍摄日期</span>
+                <span class="g-detail-row__value">2023-08-12 18:42:33 <span class="g-tag">JSON</span></span>
+              </div>
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">相册</span>
+                <span class="g-detail-row__value">2023 夏 · 京都 <span class="g-muted">（11 个文件）</span></span>
+              </div>
+              <div class="g-detail-row">
+                <span class="g-detail-row__label">处理方式</span>
+                <span class="g-detail-row__value">相册副本 · 以快捷方式保留</span>
+              </div>
+            </div>
+
+            <div class="g-compare__foot">
+              <label class="g-check">
+                <input type="checkbox">
+                <span class="g-check__box"></span>
+                <span class="g-check__label">保留此副本</span>
+              </label>
+              <div class="g-spacer"></div>
+              <span class="g-tag g-tag--mono">4a7f…e1c2</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="g-notice" style="margin-top:14px">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-info"></use></svg>
+          <span>两个文件内容完全相同（字节级一致）。保留主文件即可，相册来源会以快捷方式保留在对应相册目录中，不会重复占用空间。</span>
+        </div>
+      </div>
+
+      <footer class="g-modal__footer">
+        <span class="g-hint">只读对比 · 不会修改磁盘上的任何文件</span>
+        <div class="g-spacer"></div>
+        <button class="g-btn g-btn--ghost g-btn--sm" type="button" data-modal-close>关闭</button>
+        <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-close>跳过本组</button>
+        <button class="g-btn g-btn--primary" type="button" data-modal-close data-toast="已保留主文件并跳过 1 个重复副本。" data-toast-type="success" data-toast-title="已处理">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-check"></use></svg>保留主文件
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ====================== 模态：目录选择器 ====================== -->
+  <div class="g-modal g-modal--md" id="picker-modal" aria-hidden="true" aria-labelledby="picker-title">
+    <div class="g-modal__backdrop"></div>
+    <div class="g-modal__sheet" role="document">
+      <header class="g-modal__header">
+        <div class="g-modal__header-text">
+          <h2 class="g-modal__title" id="picker-title">选择 Takeout 目录</h2>
+          <p class="g-modal__subtitle">选择已合并解压的 Google Takeout 根目录，其中应包含「Google 相册」与年份文件夹</p>
+        </div>
+        <button class="g-modal__close" type="button" data-modal-close aria-label="关闭">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-x"></use></svg>
+        </button>
+      </header>
+
+      <div class="g-modal__body">
+        <div class="demo-picker">
+          <div class="g-chip-group demo-picker__crumbs">
+            <button class="g-chip" type="button"><svg class="g-icon" aria-hidden="true"><use href="#gi-hard-drive"></use></svg>本机磁盘</button>
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+            <button class="g-chip" type="button">Users</button>
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+            <button class="g-chip" type="button">obsid</button>
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg>
+            <button class="g-chip is-active" type="button">Downloads</button>
+          </div>
+
+          <div class="g-search">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-search"></use></svg>
+            <input class="g-input" type="search" placeholder="筛选文件夹…" aria-label="筛选文件夹" data-autofocus>
+            <span class="g-kbd g-search__kbd">/</span>
+          </div>
+
+          <div class="g-list">
+            <div class="g-list__head">常用位置</div>
+            <button class="g-list__row" type="button">
+              <span class="g-list__icon is-yellow"><svg class="g-icon" aria-hidden="true"><use href="#gi-download"></use></svg></span>
+              <span class="g-list__text"><span class="g-list__label">下载</span><span class="g-list__desc">Downloads</span></span>
+              <span class="g-list__value"><svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg></span>
+            </button>
+            <button class="g-list__row" type="button">
+              <span class="g-list__icon"><svg class="g-icon" aria-hidden="true"><use href="#gi-home"></use></svg></span>
+              <span class="g-list__text"><span class="g-list__label">桌面</span><span class="g-list__desc">Desktop</span></span>
+              <span class="g-list__value"><svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg></span>
+            </button>
+            <button class="g-list__row" type="button">
+              <span class="g-list__icon is-gray"><svg class="g-icon" aria-hidden="true"><use href="#gi-archive"></use></svg></span>
+              <span class="g-list__text"><span class="g-list__label">下载项 · Takeout 归档</span><span class="g-list__desc">3 个 ZIP · 共 14.8 GB</span></span>
+              <span class="g-list__value"><svg class="g-icon" aria-hidden="true"><use href="#gi-chevron-right"></use></svg></span>
+            </button>
+          </div>
+
+          <div class="g-list">
+            <div class="g-list__head">Takeout 目录</div>
+            <button class="g-list__row is-selected" type="button">
+              <span class="g-list__icon is-green"><svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg></span>
+              <span class="g-list__text">
+                <span class="g-list__label">Takeout-20240512T083000Z-001</span>
+                <span class="g-list__desc">8 个相册 · 12.4 GB · 已合并解压</span>
+              </span>
+              <span class="g-list__value">
+                <span class="g-badge is-success"><svg class="g-icon" aria-hidden="true"><use href="#gi-check"></use></svg>已选择</span>
+              </span>
+            </button>
+            <button class="g-list__row" type="button">
+              <span class="g-list__icon"><svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg></span>
+              <span class="g-list__text">
+                <span class="g-list__label">Takeout-20240512T083000Z-002</span>
+                <span class="g-list__desc">3 个相册 · 2.1 GB · 已合并解压</span>
+              </span>
+              <span class="g-list__value"></span>
+            </button>
+            <button class="g-list__row" type="button">
+              <span class="g-list__icon is-gray"><svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg></span>
+              <span class="g-list__text">
+                <span class="g-list__label">Google Photos 备份</span>
+                <span class="g-list__desc">尚未完成合并 · 16.2 GB</span>
+              </span>
+              <span class="g-list__value"><span class="g-badge is-warning">需合并</span></span>
+            </button>
+          </div>
+
+          <div class="g-notice">
+            <svg class="g-icon" aria-hidden="true"><use href="#gi-shield"></use></svg>
+            <span>只读取目录结构用于扫描，不会上传或删除其中的任何文件。</span>
+          </div>
+        </div>
+      </div>
+
+      <footer class="g-modal__footer">
+        <button class="g-btn g-btn--ghost g-btn--sm" type="button" data-toast="在此处创建子文件夹（演示）" data-toast-type="info">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-plus"></use></svg>新建文件夹
+        </button>
+        <div class="g-spacer"></div>
+        <button class="g-btn g-btn--secondary g-btn--sm" type="button" data-modal-close>取消</button>
+        <button class="g-btn g-btn--primary" type="button" data-modal-close data-toast="已选择：Takeout-20240512T083000Z-001" data-toast-type="success" data-toast-title="目录已更新">
+          <svg class="g-icon" aria-hidden="true"><use href="#gi-folder"></use></svg>选择此文件夹
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <script type="module" src="js/glass.js"></script>
+  <script type="module">
+    /* demo 页专用行为：主题分段同步、Toast 按钮、通过 ?open= 打开弹窗、?view=gallery 只看组件库 */
+    const Glass = window.Glass;
+    const params = new URLSearchParams(location.search);
+
+    if (params.get("static") === "1") {
+      const style = document.createElement("style");
+      style.textContent = "*,*::before,*::after{animation:none!important;transition:none!important}";
+      document.head.append(style);
+    }
+
+    if (params.get("view") === "gallery") {
+      document.body.classList.add("demo-gallery-only");
+    }
+
+    const OPEN_MAP = {
+      compare: "#compare-modal",
+      duplicates: "#compare-modal",
+      picker: "#picker-modal",
+      directory: "#picker-modal",
+    };
+    const openTarget = params.get("open");
+    if (openTarget && Glass) {
+      const selector = OPEN_MAP[openTarget] || (openTarget.startsWith("#") ? openTarget : `#${openTarget}`);
+      window.setTimeout(() => Glass.openModal(selector), 160);
+    }
+
+    /* ?toast=success|warning|error|info 用于截取 Toast 视觉验收图 */
+    const toastType = params.get("toast");
+    if (toastType && Glass) {
+      const toastMap = {
+        success: ["整理任务已完成：11,845 个动作，耗时 02:14。", "任务完成"],
+        warning: ["扫描发现 87 个文件无法确定拍摄日期，将放入 date-unknown。", "需要注意"],
+        error: ["无法写入 D:\\Photos\\整理后：磁盘空间不足。", "写入失败"],
+        info: ["正在读取 EXIF 元数据…", "进行中"],
+      };
+      const entry = toastMap[toastType] || toastMap.success;
+      window.setTimeout(() => {
+        Glass.toast(entry[0], { type: toastType in toastMap ? toastType : "success", title: entry[1], duration: 60000 });
+      }, 420);
+    }
+
+    /* 主题分段控件与真实主题双向同步 */
+    function syncThemeSegments() {
+      const current = Glass ? Glass.getTheme() : "system";
+      document.querySelectorAll("[data-theme-segmented]").forEach((seg) => {
+        const target = [...seg.querySelectorAll(".g-segment")].find((s) => s.dataset.value === current);
+        if (target && !target.classList.contains("is-selected")) {
+          Glass.selectSegmented(seg, target, { emit: false });
+        }
+      });
+    }
+    document.addEventListener("change", (event) => {
+      const seg = event.target.closest?.("[data-theme-segmented]");
+      if (seg && Glass) Glass.setTheme(event.detail?.value || "system");
+    });
+    document.addEventListener("glass:theme", syncThemeSegments);
+    syncThemeSegments();
+
+    /* data-toast 按钮 */
+    document.addEventListener("click", (event) => {
+      const btn = event.target.closest?.("[data-toast]");
+      if (!btn || !Glass) return;
+      Glass.toast(btn.dataset.toast, {
+        type: btn.dataset.toastType || "info",
+        title: btn.dataset.toastTitle || undefined,
+      });
+    });
+
+    /* 日志筛选的多组联动：同页面多个 chip-group 只更新自己的 active 状态（系统已处理） */
+    /* 折叠按钮文案切换 */
+    document.addEventListener("click", (event) => {
+      const btn = event.target.closest?.("[data-collapse]");
+      if (!btn) return;
+      const label = btn.querySelector("[data-collapse-label]");
+      if (!label) return;
+      const open = btn.getAttribute("aria-expanded") === "true";
+      label.textContent = open ? "收起选项" : "展开选项";
+    });
+
+    /* 镜面高光自检（?debug=specular）：模拟指针停在预览卡片上，验证 --mx/--my 生效 */
+    if (params.get("debug") === "specular") {
+      window.setTimeout(() => {
+        const target = document.querySelector(".demo-preview");
+        if (!target) return;
+        const r = target.getBoundingClientRect();
+        const opts = {
+          bubbles: true,
+          clientX: r.left + r.width * 0.62,
+          clientY: r.top + r.height * 0.3,
+          pointerType: "mouse",
+        };
+        target.dispatchEvent(new PointerEvent("pointerover", opts));
+        target.dispatchEvent(new PointerEvent("pointermove", opts));
+      }, 280);
+    }
+
+    /* 布局自检（?debug=layout）：输出关键容器尺寸，便于截图验收 */
+    if (params.get("debug") === "layout") {
+      (() => {
+        const rect = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
+        };
+        const pre = document.createElement("pre");
+        pre.id = "layout-info";
+        pre.style.cssText =
+          "position:fixed;z-index:99999;left:8px;top:8px;max-width:560px;max-height:90vh;overflow:auto;background:#fff;color:#000;font:10.5px/1.45 Consolas,monospace;padding:8px;border:1px solid #000;border-radius:6px;white-space:pre-wrap;margin:0";
+        const scroller = document.querySelector(".demo-preview .g-scroll");
+        pre.textContent = JSON.stringify(
+          {
+            viewport: { w: window.innerWidth, h: window.innerHeight },
+            app: rect(".glass-app"),
+            header: rect(".glass-header"),
+            body: rect(".glass-main__body"),
+            stats: rect(".g-grid--5"),
+            setup: rect(".demo-setup"),
+            preview: rect(".demo-preview"),
+            tableWrap: rect(".demo-preview .g-table-wrap"),
+            tableScroll: scroller ? { client: scroller.clientHeight, scroll: scroller.scrollHeight } : null,
+            actionbar: rect(".demo-actionbar"),
+            overflowing: [...document.querySelectorAll(".glass-app *")]
+              .filter((el) => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1);
+              })
+              .slice(0, 10)
+              .map((el) => `${el.tagName.toLowerCase()}.${(el.className || "").toString().split(" ").slice(0, 2).join(".")}`),
+          },
+          null,
+          2
+        );
+        document.body.append(pre);
+      })();
+    }
+  </script>
+</body>
+</html>
